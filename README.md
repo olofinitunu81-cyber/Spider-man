@@ -16,18 +16,29 @@ python3 -m http.server 8080
 
 ## Controls
 
-In chapter one (click the game once so the mouse steers the camera):
+In chapter one (click the game once so the mouse steers the camera). The layout follows the
+usual PC controls for this kind of game:
 
 | | Keyboard / mouse | Controller |
 |---|---|---|
 | Move / look | W A S D / mouse | Left stick / right stick |
-| Jump | Space | A |
-| Swing | Keep holding Space in the air; let go to fly | Hold A or RT |
-| Sprint | Shift | LT or L3 |
-| Web-zip to where you aim | E or right click | X or RB |
-| Web a drone | F or left click | Y or LB |
-| Run up a wall | Run into it; Space jumps off | Same |
-| Pause | Esc | Start |
+| Walk | Hold Left Alt | Hold L3 |
+| Swing (in the air) / sprint | Hold Left Shift | Hold RT |
+| Jump, hold for a higher jump; in the air, web-zip | Space | A |
+| Zip to the point you aim at | C | RB |
+| Perch on that point, or dive | X | LB |
+| Air trick | T | R3 |
+| Melee | Left click | X |
+| Web-strike (zip in and catch a drone) | F | Y |
+| Dodge | Left Ctrl or mouse button 4 | B |
+| Aim / yank | Hold right mouse / Q | Hold LT / RB |
+| Heal (uses Focus) / finisher (full Focus) | 1 / 2 | D-pad up / down |
+| Gadget (web bomb) | E | D-pad left |
+| Map / scan | Tab / V | View / D-pad right |
+| Pause / photo mode / high contrast | Esc / P / G | Start |
+
+Run into a wall to run up it; Space jumps off. Ctrl+W is the browser's close-tab shortcut, so
+tap Left Ctrl to dodge rather than holding it (in fullscreen the game keeps it).
 
 In the menu:
 

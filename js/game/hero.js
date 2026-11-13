@@ -246,18 +246,19 @@
       limb(tgt.legL[0], 0.0, 0.07, 1); limb(tgt.legL[1], -0.04, 0.05, 1); tgt.legL[2].set(0.08, -0.3, 1).normalize();
       limb(tgt.legR[0], 0.0, 0.07, -1); limb(tgt.legR[1], -0.04, 0.05, -1); tgt.legR[2].set(-0.08, -0.3, 1).normalize();
     }
-    function poseRun(ph, s) { // s: 0 jog … 1 sprint
-      const a = U.lerp(0.55, 0.85, s), sinP = Math.sin(ph), cosP = Math.cos(ph);
+    function poseRun(ph, s, w) { // s: 0 jog … 1 sprint; w: 1 = a walk
+      w = w || 0;
+      const a = U.lerp(U.lerp(0.55, 0.85, s), 0.36, w), sinP = Math.sin(ph), cosP = Math.cos(ph);
       const leg = (out, p, side) => {
-        const th = a * Math.sin(p), bend = 0.28 + U.lerp(1.2, 1.7, s) * Math.pow(Math.max(0, Math.cos(p + 0.55)), 1.3);
+        const th = a * Math.sin(p), bend = U.lerp(0.28, 0.08, w) + U.lerp(U.lerp(1.2, 1.7, s), 0.55, w) * Math.pow(Math.max(0, Math.cos(p + 0.55)), 1.3);
         limb(out[0], th, 0.05, side); limb(out[1], th - bend, 0.04, side);
         out[2].set(0, -0.15 - 0.5 * Math.max(0, -Math.sin(p)), 1).normalize();
       };
       leg(tgt.legL, ph, 1); leg(tgt.legR, ph + Math.PI, -1);
-      const arm = (out, p, side) => { const sw = -U.lerp(0.65, 1.0, s) * Math.sin(p); limb(out[0], sw, 0.2, side); limb(out[1], sw + U.lerp(1.25, 1.5, s), 0.05, side); };
+      const arm = (out, p, side) => { const sw = -U.lerp(U.lerp(0.65, 1.0, s), 0.32, w) * Math.sin(p); limb(out[0], sw, U.lerp(0.2, 0.14, w), side); limb(out[1], sw + U.lerp(U.lerp(1.25, 1.5, s), 0.35, w), 0.05, side); };
       arm(tgt.armL, ph, 1); arm(tgt.armR, ph + Math.PI, -1);
-      tgt.hip.set(U.lerp(0.12, 0.3, s), 0.14 * sinP, 0); tgt.spine.set(U.lerp(0.08, 0.2, s), -0.3 * sinP, 0.03 * cosP); tgt.head.set(-U.lerp(0.18, 0.4, s), 0.12 * sinP, 0);
-      tgt.fist = 0.85;
+      tgt.hip.set(U.lerp(U.lerp(0.12, 0.3, s), 0.02, w), 0.14 * sinP * (1 - w * 0.5), 0); tgt.spine.set(U.lerp(U.lerp(0.08, 0.2, s), 0.02, w), -0.3 * sinP * (1 - w * 0.6), 0.03 * cosP); tgt.head.set(-U.lerp(U.lerp(0.18, 0.4, s), 0.05, w), 0.12 * sinP * (1 - w), 0);
+      tgt.fist = U.lerp(0.85, 0.5, w);
     }
     function poseAir(vy, t) {
       const up = U.clamp(vy / 9, -1, 1);
@@ -304,6 +305,28 @@
       limb(tgt.armR[0], 0.2 * k, 0.45, -1); limb(tgt.armR[1], 0.5 * k, 0.3, -1);
       tgt.spine.set(0.45 * k, 0, 0); tgt.hip.set(0.35 * k, 0, 0); tgt.head.set(-0.4 * k, 0, 0); tgt.fist = 0.6;
     }
+    function poseDive() { // head first, arms forward, legs trailing
+      tgt.armL[0].set(0.25, 0.92, 0.3).normalize(); tgt.armL[1].set(0.12, 0.98, 0.15).normalize();
+      tgt.armR[0].set(-0.25, 0.92, 0.3).normalize(); tgt.armR[1].set(-0.12, 0.98, 0.15).normalize();
+      limb(tgt.legL[0], -0.08, 0.1, 1); limb(tgt.legL[1], -0.25, 0.06, 1);
+      limb(tgt.legR[0], 0.05, 0.1, -1); limb(tgt.legR[1], -0.45, 0.06, -1);
+      tgt.legL[2].set(0, -1, -0.2).normalize(); tgt.legR[2].set(0, -1, -0.2).normalize();
+      tgt.spine.set(-0.15, 0, 0); tgt.hip.set(0, 0, 0); tgt.head.set(-0.75, 0, 0); tgt.fist = 0.2;
+    }
+    function poseTuck() { // knees to chest, for flips and rolls
+      limb(tgt.legL[0], 1.45, 0.14, 1); limb(tgt.legL[1], -0.9, 0.08, 1);
+      limb(tgt.legR[0], 1.45, 0.14, -1); limb(tgt.legR[1], -0.9, 0.08, -1);
+      tgt.legL[2].set(0, -0.6, 0.8).normalize(); tgt.legR[2].set(0, -0.6, 0.8).normalize();
+      limb(tgt.armL[0], 1.0, 0.25, 1); limb(tgt.armL[1], 0.2, 0.1, 1);
+      limb(tgt.armR[0], 1.0, 0.25, -1); limb(tgt.armR[1], 0.2, 0.1, -1);
+      tgt.spine.set(0.55, 0, 0); tgt.hip.set(0.2, 0, 0); tgt.head.set(0.3, 0, 0); tgt.fist = 0.9;
+    }
+    function posePunch(right, k) { // k: 1 at full reach
+      const arm = right ? tgt.armR : tgt.armL, guard = right ? tgt.armL : tgt.armR, sd = right ? -1 : 1;
+      arm[0].set(sd * 0.12 * (1 - k), 0.12, 1).normalize(); arm[1].set(sd * 0.05, 0.1, 1).normalize();
+      guard[0].set(sd * -0.35, -0.6, 0.55).normalize(); guard[1].set(sd * 0.25, 0.75, 0.6).normalize();
+      tgt.spine.y += (right ? 0.45 : -0.45) * k; tgt.fist = 1;
+    }
     function aimArm(useRight, dirLocal) {
       const arm = useRight ? tgt.armR : tgt.armL;
       arm[0].copy(dirLocal); arm[1].copy(dirLocal);
@@ -342,9 +365,10 @@
       let rate = 12, orientRate = 10;
       if (s.state === 'ground') {
         if (s.speed > 0.6) {
-          const stride = U.lerp(1.15, 1.8, s.sprint);
+          const w = U.clamp((5 - s.speed) / 2, 0, 1);
+          const stride = U.lerp(U.lerp(1.15, 1.8, s.sprint), 0.7, w);
           phase = (phase + (s.speed * dt / stride) * Math.PI) % (Math.PI * 2);
-          poseRun(phase, s.sprint);
+          poseRun(phase, s.sprint, w);
           rate = 16;
         } else poseIdle(idleT);
         if (s.landT > 0) poseLand(U.clamp(s.landT / 0.22, 0, 1));
@@ -354,13 +378,16 @@
         tmpV.copy(s.webPoint).sub(s.hip).applyQuaternion(inv).normalize();
         poseSwing(tmpV, s.webRight, s.swingK);
         rate = 9; orientRate = 7;
-      } else if (s.state === 'zip') { poseZip(); rate = 14; orientRate = 12; }
+      } else if (s.state === 'zip' || s.state === 'boost') { poseZip(); rate = 14; orientRate = 12; }
       else if (s.state === 'wall') {
         phase = (phase + (Math.max(s.speed, 2) * dt / 1.2) * Math.PI) % (Math.PI * 2);
         poseRun(phase, 0.3);
         tgt.hip.x = 0.05; tgt.spine.x = 0.05; tgt.head.x = -0.6;
         rate = 16; orientRate = 12;
-      } else { poseAir(s.vy, idleT); rate = 8; orientRate = 6; }
+      } else if (s.dive) { poseDive(); rate = 10; orientRate = 8; }
+      else { poseAir(s.vy, idleT); rate = 8; orientRate = 6; }
+      if (s.spin) { poseTuck(); rate = 18; }
+      if (s.punch > 0) posePunch(s.punchRight, Math.sin(U.clamp(1 - s.punch / 0.22, 0, 1) * Math.PI));
       if (s.aimPoint) { // firing a web at something
         inv.copy(bodyQ).invert();
         aimArm(s.aimRight, tmpV.copy(s.aimPoint).sub(s.hip).applyQuaternion(inv).normalize());
@@ -371,9 +398,11 @@
       else cur.hipY = U.lerp(cur.hipY, 0, 1 - Math.exp(-6 * dt));
       face(s.up, s.fwd, orientRate, dt);
       apply();
-      // place the body so the hips sit at the given point however he is turned
-      hipWorld.copy(hipsRest).applyQuaternion(bodyQ);
+      // tricks and rolls spin the whole body about the hips on top of everything else
       mesh.quaternion.copy(bodyQ);
+      if (s.spin) mesh.quaternion.multiply(tmpQ.setFromAxisAngle(s.spin.axis, s.spin.angle));
+      // place the body so the hips sit at the given point however he is turned
+      hipWorld.copy(hipsRest).applyQuaternion(mesh.quaternion);
       mesh.position.copy(s.hip).sub(hipWorld);
       mesh.updateMatrixWorld(true);
     }

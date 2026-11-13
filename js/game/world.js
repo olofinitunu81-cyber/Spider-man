@@ -165,7 +165,7 @@
     /* ---------- drawing ---------- */
     const cityU = Object.assign({
       uWallA: { value: new T.Vector3() }, uWallB: { value: new T.Vector3() }, uRimC: { value: new T.Vector3() }, uFillC: { value: new T.Vector3() },
-      uWin0: { value: new T.Vector3() }, uWin1: { value: new T.Vector3() }, uWin2: { value: new T.Vector3() }, uTime: shared.timeU, uGrain: shared.grainU,
+      uWin0: { value: new T.Vector3() }, uWin1: { value: new T.Vector3() }, uWin2: { value: new T.Vector3() }, uTime: shared.timeU, uGrain: shared.grainU, uMuted: shared.mutedU,
     }, shared.fogU);
     const cityMat = new T.ShaderMaterial({ vertexShader: S.CITY_VS, fragmentShader: S.CITY_FS, uniforms: cityU });
 
@@ -213,7 +213,7 @@
     const groundMat = new T.ShaderMaterial({
       vertexShader: 'varying vec3 vWorld; void main(){ vec4 wp = modelMatrix * vec4(position, 1.0); vWorld = wp.xyz; gl_Position = projectionMatrix * viewMatrix * wp; }',
       fragmentShader: GROUND_FS(S),
-      uniforms: Object.assign({ uRoad: { value: new T.Vector3() }, uWalk: { value: new T.Vector3() }, uLine: { value: new T.Vector3() }, uTime: shared.timeU, uGrain: shared.grainU }, shared.fogU),
+      uniforms: Object.assign({ uRoad: { value: new T.Vector3() }, uWalk: { value: new T.Vector3() }, uLine: { value: new T.Vector3() }, uTime: shared.timeU, uGrain: shared.grainU, uMuted: shared.mutedU }, shared.fogU),
     });
     const ground = new T.Mesh(new T.PlaneGeometry(9000, 9000).rotateX(-Math.PI / 2), groundMat);
     ground.frustumCulled = false;
@@ -222,7 +222,7 @@
     // the Bugle's sign, readable from both sides
     const signMat = new T.ShaderMaterial({
       vertexShader: SIGN_VS, fragmentShader: SIGN_FS(S), side: T.DoubleSide,
-      uniforms: Object.assign({ uMap: { value: signTexture() }, uTime: shared.timeU, uGrain: shared.grainU }, shared.fogU),
+      uniforms: Object.assign({ uMap: { value: signTexture() }, uTime: shared.timeU, uGrain: shared.grainU, uMuted: shared.mutedU }, shared.fogU),
     });
     const sign = new T.Mesh(new T.PlaneGeometry(30, 6.6), signMat);
     sign.position.set(bx, 222.5, bz + 6.7);
@@ -236,7 +236,7 @@
         uLut: { value: shared.lut }, uSunDir: { value: shared.sunDir }, uCore: { value: new T.Vector3() }, uMid: { value: new T.Vector3() },
         uEdge: { value: new T.Vector3() }, uSunGlow: { value: new T.Vector3() }, uHalo: { value: new T.Vector3() },
         uRays: { value: new T.Vector4() }, uSunPx: { value: new T.Vector2() }, uSunRpx: { value: 200 },
-        uTime: shared.timeU, uStars: { value: 1 }, uMotion: { value: 1 }, uGrain: shared.grainU,
+        uTime: shared.timeU, uStars: { value: 1 }, uMotion: { value: 1 }, uGrain: shared.grainU, uMuted: shared.mutedU,
       },
     });
     const sky = new T.Mesh(new T.SphereGeometry(1, 24, 16), skyMat);
@@ -415,7 +415,7 @@
     }
 
     return {
-      PITCH, LOT, SPAN, bugleTop, tops, solids, cityU, groundMat,
+      PITCH, LOT, SPAN, bugleTop, tops, solids, cityU, groundMat, extent: (SPAN + 0.5) * PITCH,
       applyPalette, update, collide, floorAt, raycast, findAnchor, findPerch, near, dispose,
       start: new T.Vector3(0, 46, 0),
     };

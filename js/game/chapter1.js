@@ -201,7 +201,7 @@
             ringN++;
             sound('select');
             if (ringN === 1) say('Okay. The stitches are holding. So am I.', 3.5);
-            if (ringN === 3) say('Tap E to web-zip to whatever you are looking at.', 4, true);
+            if (ringN === 3) say(ctx.keys('zip') + ' zips to the point you aim at. ' + ctx.keys('perch') + ' perches there, or dives.', 4.5, true);
             if (ringN < rings.length) { rings[ringN].mat.uniforms.uGlow.value = 1; state.marker.copy(rings[ringN].c); setObjective('Get your swing back', 'Swing through the rings', ringN + ' / 6'); }
             else {
               state.stage = 'drones';
@@ -215,7 +215,7 @@
       rings.forEach((r) => { if (r.pop > 0) { r.pop -= dt * 2.2; r.mesh.scale.setScalar(1 + (1 - Math.max(0, r.pop)) * 0.6); if (r.pop <= 0) r.mesh.visible = false; } });
 
       if (state.stage === 'drones') {
-        if (!active && spawnIn > 0) { spawnIn -= dt; if (spawnIn <= 0) { spawnDrone(drones[caught], hip, pl.facing); if (caught === 0) say('F or left click: web a drone when you are close.', 4.5, true); } }
+        if (!active && spawnIn > 0) { spawnIn -= dt; if (spawnIn <= 0) { spawnDrone(drones[caught], hip, pl.facing); if (caught === 0) say(ctx.keys('strike') + ' web-strikes a drone in range. Aim with ' + ctx.keys('aim') + ' and ' + ctx.keys('yank') + ' to yank it.', 5.5, true); } }
         if (active) state.marker.copy(active.pos);
       }
 
@@ -270,6 +270,15 @@
       prevHip.copy(hip);
     }
 
+    /** The drone that is out now, if it can still be caught. */
+    function activeDrone() { return active && active.state === 'flying' ? active : null; }
+    /** Catch the active drone (by web-strike, punch, yank, finisher or web bomb). */
+    function catchActive() {
+      if (!active || active.state !== 'flying') return false;
+      active.state = 'webbed'; active.wT = 0;
+      return true;
+    }
+
     /** Is there a drone where the camera points? Returns its position to aim the web at. */
     function tryShoot(o, dir, from) {
       if (!active || active.state !== 'flying') return null;
@@ -294,7 +303,7 @@
       ringGeo.dispose(); droneGeo.dispose(); webBall.geometry.dispose(); beam.geometry.dispose();
     }
 
-    return { state, update, tryShoot, canShoot, dispose, start: { pos: new T.Vector3(21, 46, 12), facing: Math.PI }, rings, drones };
+    return { state, update, tryShoot, canShoot, activeDrone, catchActive, dispose, start: { pos: new T.Vector3(21, 46, 12), facing: Math.PI }, rings, drones };
   }
 
   SMR.createChapter1 = createChapter1;

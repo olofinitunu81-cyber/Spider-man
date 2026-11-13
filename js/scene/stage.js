@@ -27,8 +27,9 @@
 
   // Film grain, added at the end of every shader (cheaper than a blended CSS layer).
   const GRAIN_GLSL = `
-    uniform float uGrain;
+    uniform float uGrain, uMuted;
     vec3 grain(vec3 c) {
+      c = mix(c, vec3(dot(c, vec3(0.299, 0.587, 0.114))) * 0.5 + 0.03, uMuted); // high-contrast mode: the world steps back
       vec2 p = gl_FragCoord.xy + fract(uTime * 7.31) * vec2(397.0, 211.0);
       float n = fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
       return c * (1.0 + n * uGrain) + n * uGrain * 0.08;
