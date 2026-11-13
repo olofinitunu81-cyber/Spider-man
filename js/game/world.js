@@ -428,8 +428,8 @@
       // street trees along the sidewalks, lamps at the kerb, a traffic light at each corner
       if (Math.abs(bi) <= 9 && Math.abs(bj) <= 11) {
         const e = LOT / 2 + 2.3;
-        for (let side = 0; side < 4; side++) for (const t of [-0.62, -0.2, 0.22, 0.64]) {
-          if (r() < 0.3) continue;
+        for (let side = 0; side < 4; side++) for (const t of [-0.6, 0.0, 0.6]) {
+          if (r() < 0.35 || Math.abs(bi) + Math.abs(bj) > 14) continue;
           const a = t * LOT / 2;
           const [tx, tz] = side === 0 ? [cx + a, cz - e] : side === 1 ? [cx + e, cz + a] : side === 2 ? [cx - a, cz + e] : [cx - e, cz - a];
           trees.push([tx, tz, r.range(0.8, 1.2)]);
@@ -571,8 +571,8 @@
       uniforms: Object.assign({ uSunC: cityU.uSunC, uSkyC: cityU.uSkyC, uTime: shared.timeU, uGrain: shared.grainU, uMuted: shared.mutedU }, shared.fogU),
     });
     const treeGeo = merged([
-      [new T.CylinderGeometry(0.16, 0.24, 3.2, 6), 0, 1.6, 0, 0],
-      [new T.IcosahedronGeometry(2.3, 0), 0, 4.6, 0, 1, true], [new T.IcosahedronGeometry(1.7, 0), 1.1, 5.6, 0.5, 1, true], [new T.IcosahedronGeometry(1.6, 0), -0.9, 5.2, -0.7, 1, true], [new T.IcosahedronGeometry(1.3, 0), 0.4, 6.4, -0.6, 1, true],
+      [new T.CylinderGeometry(0.16, 0.24, 3.2, 5, 1, true), 0, 1.6, 0, 0],
+      [new T.IcosahedronGeometry(2.4, 0), 0, 4.7, 0, 1, true], [new T.IcosahedronGeometry(1.8, 0), 1.0, 5.8, 0.4, 1, true], [new T.IcosahedronGeometry(1.6, 0), -0.9, 5.3, -0.7, 1, true],
     ]);
     const LEAVES = ['#c86a2c', '#e09a35', '#d4b33e', '#8a9a3a', '#5f7d34', '#b2452a', '#e5c35a', '#6f8f3f'];
     const treeColor = new Float32Array(trees.length * 3);
@@ -600,6 +600,26 @@
     const lightMesh = new T.InstancedMesh(lightGeo, propMat, lights.length);
     lights.forEach(([x, z, yaw], i) => { m4.compose(v1.set(x, 0, z), qI.setFromAxisAngle(Y, yaw), v2.set(1, 1, 1)); lightMesh.setMatrixAt(i, m4); });
     lightMesh.frustumCulled = false; scene.add(lightMesh);
+
+    // only draw the props near the camera (the haze hides the rest): re-picked as it moves
+    function culler(mesh, pts, radius, colAttr) {
+      const mats = mesh.instanceMatrix.array.slice(), cols = colAttr ? colAttr.array.slice() : null, r2 = radius * radius;
+      return (c) => {
+        const arr = mesh.instanceMatrix.array;
+        let n = 0;
+        for (let i = 0; i < pts.length; i++) {
+          const dx = pts[i][0] - c.x, dz = pts[i][1] - c.z;
+          if (dx * dx + dz * dz > r2) continue;
+          arr.set(mats.subarray(i * 16, i * 16 + 16), n * 16);
+          if (cols) colAttr.array.set(cols.subarray(i * 3, i * 3 + 3), n * 3);
+          n++;
+        }
+        mesh.count = n;
+        mesh.instanceMatrix.needsUpdate = true;
+        if (cols) colAttr.needsUpdate = true;
+      };
+    }
+    const cullers = [culler(treeMesh, trees, 520, treeGeo.attributes.aColor), culler(lampMesh, lamps, 380), culler(lightMesh, lights, 380)];
 
     // boats on the river
     const boatGeo = merged([[new T.BoxGeometry(5, 1.6, 16), 0, 0.3, 0, 0], [new T.BoxGeometry(3.6, 1.8, 6), 0, 1.9, -1.5, 0], [new T.BoxGeometry(3.2, 0.5, 0.06), 0, 2.2, 1.56, 2]]);
@@ -668,9 +688,10 @@
         boatColor.set(i % 3 === 0 ? [0.85, 0.2, 0.15] : [0.9, 0.9, 0.88], i * 3);
       });
       boatMesh.instanceMatrix.needsUpdate = true;
-      if (sortedAt.distanceToSquared(camera.position) > 60 * 60) {
+      if (sortedAt.distanceToSquared(camera.position) > 50 * 50) {
         sortedAt.copy(camera.position);
         const c = camera.position;
+        cullers.forEach((f) => f(c));
         const order = boxes.slice().sort((a, b) => ((a[0] - c.x) ** 2 + (a[2] - c.z) ** 2) - ((b[0] - c.x) ** 2 + (b[2] - c.z) ** 2));
         writeBoxes(order);
       }
