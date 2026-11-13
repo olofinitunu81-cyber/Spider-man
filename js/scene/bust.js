@@ -40,12 +40,24 @@
 
   /** Build { positions, normals, indices } for the bust. */
   function build(cell) {
-    const x0 = -2.6, y0 = -3.36, z0 = -1.3, x1 = 2.6, y1 = 1.12, z1 = 1.14;
-    const nx = Math.ceil((x1 - x0) / cell) + 1, ny = Math.ceil((y1 - y0) / cell) + 1, nz = Math.ceil((z1 - z0) / cell) + 1;
+    const B = 2; // the grid is first sampled every B points; blocks clearly away from the surface are skipped
+    const x0 = -2.6, y0 = -3.36, z0 = -1.3;
+    const nx = Math.ceil(5.2 / cell / B) * B + 1, ny = Math.ceil(4.48 / cell / B) * B + 1, nz = Math.ceil(2.44 / cell / B) * B + 1;
     const vals = new Float32Array(nx * ny * nz);
-    for (let k = 0, i = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let ii = 0; ii < nx; ii++, i++) vals[i] = sdf(x0 + ii * cell, y0 + j * cell, z0 + k * cell);
-
+    const done = new Uint8Array(nx * ny * nz);
     const at = (i, j, k) => vals[i + nx * (j + ny * k)];
+    const half = 0.5 * B * cell * Math.sqrt(3) * 1.35;
+    for (let bk = 0; bk < nz - 1; bk += B) for (let bj = 0; bj < ny - 1; bj += B) for (let bi = 0; bi < nx - 1; bi += B) {
+      const c = sdf(x0 + (bi + B / 2) * cell, y0 + (bj + B / 2) * cell, z0 + (bk + B / 2) * cell);
+      const far = Math.abs(c) > half;
+      for (let k = bk; k <= bk + B; k++) for (let j = bj; j <= bj + B; j++) for (let i = bi; i <= bi + B; i++) {
+        const n = i + nx * (j + ny * k);
+        if (done[n] === 2) continue;
+        if (far) { if (!done[n]) { vals[n] = c; done[n] = 1; } }
+        else { vals[n] = sdf(x0 + i * cell, y0 + j * cell, z0 + k * cell); done[n] = 2; }
+      }
+    }
+
     const cellVert = new Int32Array((nx - 1) * (ny - 1) * (nz - 1)).fill(-1);
     const cidx = (i, j, k) => i + (nx - 1) * (j + (ny - 1) * k);
     const pos = [];
@@ -70,14 +82,16 @@
     const positions = new Float32Array(pos), normals = new Float32Array(pos.length);
     const e = 0.004;
     for (let i = 0; i < positions.length; i += 3) {
-      let x = positions[i], y = positions[i + 1], z = positions[i + 2], gx = 0, gy = 0, gz = 1;
-      for (let it = 0; it < 2; it++) {
-        gx = sdf(x + e, y, z) - sdf(x - e, y, z); gy = sdf(x, y + e, z) - sdf(x, y - e, z); gz = sdf(x, y, z + e) - sdf(x, y, z - e);
-        const l = Math.sqrt(gx * gx + gy * gy + gz * gz) || 1; gx /= l; gy /= l; gz /= l;
-        const d = sdf(x, y, z); x -= gx * d; y -= gy * d; z -= gz * d;
-      }
+      let x = positions[i], y = positions[i + 1], z = positions[i + 2];
+      let d = sdf(x, y, z);
+      let gx = sdf(x + e, y, z) - d, gy = sdf(x, y + e, z) - d, gz = sdf(x, y, z + e) - d;
+      let l = Math.sqrt(gx * gx + gy * gy + gz * gz) || 1;
+      x -= (gx / l) * d; y -= (gy / l) * d; z -= (gz / l) * d;
+      d = sdf(x, y, z);
+      gx = sdf(x + e, y, z) - d; gy = sdf(x, y + e, z) - d; gz = sdf(x, y, z + e) - d;
+      l = Math.sqrt(gx * gx + gy * gy + gz * gz) || 1;
       positions[i] = x; positions[i + 1] = y; positions[i + 2] = z;
-      normals[i] = gx; normals[i + 1] = gy; normals[i + 2] = gz;
+      normals[i] = gx / l; normals[i + 1] = gy / l; normals[i + 2] = gz / l;
     }
 
     // one quad for every grid edge that crosses the surface

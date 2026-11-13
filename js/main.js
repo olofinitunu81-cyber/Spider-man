@@ -4,14 +4,6 @@
   const SMR = window.SMR;
   const app = document.getElementById('app');
 
-  // film grain: one small noise tile, shifted around by CSS
-  (function grain() {
-    const c = SMR.util.makeCanvas(180, 180), g = c.getContext('2d'), img = g.createImageData(180, 180);
-    for (let i = 0; i < img.data.length; i += 4) { const v = Math.random() * 255; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
-    g.putImageData(img, 0, 0);
-    document.querySelector('.grain').style.backgroundImage = 'url(' + c.toDataURL() + ')';
-  })();
-
   // browser tab icon, from the same spider mark the suit wears
   const icon = document.createElement('link');
   icon.rel = 'icon';

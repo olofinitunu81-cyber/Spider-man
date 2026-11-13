@@ -45,14 +45,14 @@
   function applySettings() {
     const s = store.all();
     audio.setVolumes(s.master, s.music, s.sfx);
-    stage.setOptions({ motion: s.motion, parallax: s.parallax });
+    stage.setOptions({ motion: s.motion, parallax: s.parallax, grain: s.grain });
+    stage.setQuality(s.quality);
     stage.setPalette(s.sky === 'auto' ? SMR.paletteForHour(new Date().getHours()) : s.sky);
-    app.classList.toggle('no-grain', !s.grain);
     app.classList.toggle('no-motion', !s.motion);
     app.classList.toggle('contrast', s.contrast);
     document.documentElement.style.setProperty('--text-scale', s.textSize / 100);
     $('fps').hidden = !s.fps;
-    stage.onFps(s.fps ? (n) => { $('fps').textContent = n + ' FPS'; } : null);
+    stage.onFps(s.fps ? (n, h) => { $('fps').textContent = n + ' FPS \u00b7 ' + h + 'p'; } : null);
     const suit = suitById(s.suit);
     document.documentElement.style.setProperty('--accent', suit.accent);
     document.documentElement.style.setProperty('--accent2', suit.accent2);
@@ -281,6 +281,7 @@
     { label: 'Display', rows: [
       { type: 'action', label: 'Fullscreen', value: () => (document.fullscreenElement ? 'On' : 'Off'), desc: 'Fill the whole screen.',
         run() { if (document.fullscreenElement) document.exitFullscreen(); else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => toast('Fullscreen is not available here')); } },
+      { type: 'cycle', key: 'quality', label: 'Graphics quality', values: [['auto', 'Auto'], ['high', 'High'], ['low', 'Low']], desc: 'Auto lowers the resolution by itself if your computer starts to struggle. Low is smoothest on older machines.' },
       { type: 'cycle', key: 'sky', label: 'Time of day', values: [['dawn', 'First light'], ['dusk', 'Last light'], ['night', 'Midnight'], ['auto', 'Match my clock']], desc: 'Relight the whole city.' },
       { type: 'cycle', key: 'grain', label: 'Film grain', values: ONOFF, desc: 'A little print texture over the picture.' },
       { type: 'cycle', key: 'parallax', label: 'Follow the pointer', values: ONOFF, desc: 'The camera and his head follow your mouse.' },
@@ -427,12 +428,13 @@
       clearTimeout(this.timer);
       this.timer = setTimeout(() => {
         el.classList.add('arrived');
+        stage.hold(true); // the city is fully covered here, so stop drawing it
         setFocus(items(el)[0], true);
         this.hints = [['ok', 'Back to menu']];
         renderHints();
       }, 2100);
     },
-    leave() { clearTimeout(this.timer); this.hints = []; stage.setShot('main', true); },
+    leave() { clearTimeout(this.timer); this.hints = []; stage.hold(false); stage.setShot('main', true); },
     handle(action) { if (!this.el.classList.contains('arrived')) return true; if (action === 'back') { back(); return true; } return false; },
   });
 

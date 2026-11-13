@@ -7,7 +7,7 @@
   const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const DEFAULTS = {
     master: 80, music: 60, sfx: 80,
-    sky: 'dawn', grain: true, parallax: true, fps: false,
+    sky: 'dawn', quality: 'auto', grain: true, parallax: true, fps: false,
     difficulty: 'crawler', subtitles: true, vibration: true,
     motion: !reduce, textSize: 100, contrast: false,
     suit: 'rebirth',

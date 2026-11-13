@@ -29,13 +29,10 @@ button:focus { outline: none; }
 #fx { pointer-events: none; }
 
 /* ---------- atmosphere over the 3D view ---------- */
-.grain { position: absolute; inset: -60px; pointer-events: none; opacity: .11; mix-blend-mode: overlay; animation: grain 0.6s steps(6) infinite; }
-.no-grain .grain { display: none; }
-@keyframes grain { 0% { transform: translate(0, 0); } 20% { transform: translate(-22px, 14px); } 40% { transform: translate(18px, -26px); } 60% { transform: translate(-30px, -8px); } 80% { transform: translate(26px, 22px); } 100% { transform: translate(0, 0); } }
 .vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(120% 90% at 55% 45%, transparent 55%, rgba(3, 4, 12, .55) 100%), linear-gradient(0deg, rgba(3, 4, 12, .6), transparent 22%); }
 
 /* the slab of ink the menu sits on, with a printed dot edge */
-.scrim { position: absolute; top: -10%; bottom: -10%; left: -30vw; width: calc(var(--scrim, 0vw) + 30vw); background: linear-gradient(90deg, rgba(5, 6, 15, .95) 0%, rgba(5, 6, 15, .92) 72%, rgba(5, 6, 15, .8) 100%); transform: skewX(-9deg); transition: width .7s var(--ease), opacity .5s ease; pointer-events: none; opacity: 0; }
+.scrim { position: absolute; top: -10%; bottom: -10%; left: 0; width: 160vw; background: linear-gradient(90deg, rgba(5, 6, 15, .95) 0%, rgba(5, 6, 15, .93) 82%, rgba(5, 6, 15, .8) 100%); transform: translateX(calc(var(--scrim, 0vw) - 160vw)) skewX(-9deg); transition: transform .7s var(--ease), opacity .5s ease; pointer-events: none; opacity: 0; will-change: transform; }
 .scrim::after { content: ""; position: absolute; top: 0; bottom: 0; left: calc(100% - 1px); width: 11rem; background: radial-gradient(circle at 50% 50%, rgba(5, 6, 15, .88) 0 36%, transparent 39%) 0 0 / .95rem .95rem; -webkit-mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, .55) 35%, transparent 100%); mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, .55) 35%, transparent 100%); }
 .scrim::before { content: ""; position: absolute; top: 0; bottom: 0; right: -.35rem; width: .35rem; background: var(--accent); opacity: .9; }
 #app[data-screen="main"] { --scrim: 43vw; }

@@ -21,6 +21,19 @@
   const CAM_HEIGHT = 92;
   const HERO_DIST = 9.2, HERO_FOV = 26;
 
+  // Pixel budgets for the 3D view, in device pixels. "Auto" quality moves between them.
+  const BUDGET = { floor: 0.45e6, low: 0.9e6, start: 2.1e6, high: 3.7e6 };
+  const MIN_GAP = 10.5; // ms between drawn frames: about 60 fps on 120 Hz screens, 72 on 144 Hz
+
+  // Film grain, added at the end of every shader (cheaper than a blended CSS layer).
+  const GRAIN_GLSL = `
+    uniform float uGrain;
+    vec3 grain(vec3 c) {
+      vec2 p = gl_FragCoord.xy + fract(uTime * 7.31) * vec2(397.0, 211.0);
+      float n = fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+      return c * (1.0 + n * uGrain) + n * uGrain * 0.08;
+    }`;
+
   const FOG_GLSL = `
     uniform vec3 uHazeLow, uHazeHigh, uGlow, uSunDir;
     uniform float uFog;
@@ -39,7 +52,7 @@
     void main() {
       vDir = position;
       vec4 p = projectionMatrix * viewMatrix * vec4(position + cameraPosition, 1.0);
-      gl_Position = p.xyww;
+      gl_Position = vec4(p.xy, p.w * 0.99999, p.w); // just inside the far plane: hidden wherever the city is drawn
     }`;
   const SKY_FS = `
     precision highp float;
@@ -49,6 +62,7 @@
     uniform vec2 uSunPx;
     uniform float uSunRpx, uTime, uStars, uMotion;
     varying vec3 vDir;
+    ${GRAIN_GLSL}
     float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
     void main() {
       vec3 d = normalize(vDir);
@@ -80,70 +94,82 @@
       float disc = 1.0 - smoothstep(uSunRpx - 1.2, uSunRpx + 1.2, length(sp));
       vec3 dc = mix(mix(uCore, uMid, smoothstep(0.0, 0.62, rf)), uEdge, smoothstep(0.62, 1.0, rf));
       col = mix(col, dc, disc);
-      gl_FragColor = vec4(col, 1.0);
+      gl_FragColor = vec4(grain(col), 1.0);
     }`;
 
+  // Buildings are flat-sided boxes, so their lighting and haze are worked out once per corner
+  // here; only the windows are drawn per pixel.
   const CITY_VS = `
     attribute vec4 aInfo;
-    varying vec3 vWorld, vNormal, vLocal, vSize, vNl;
+    uniform vec3 uWallA, uWallB, uRimC, uFillC, uHazeLow, uHazeHigh, uGlow, uSunDir;
+    uniform float uFog;
+    varying vec3 vLocal, vSize, vNl, vBase, vFogC;
     varying vec4 vInfo;
+    varying vec2 vPitch;
+    varying float vRoof, vFogF, vY;
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
     void main() {
       vec3 sc = vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz));
       vLocal = position * sc;
       vSize = sc;
       vNl = normal;
-      vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
-      vWorld = wp.xyz;
-      vNormal = normalize(mat3(instanceMatrix) * (normal / sc));
       vInfo = aInfo;
-      gl_Position = projectionMatrix * viewMatrix * wp;
-    }`;
-  const CITY_FS = `
-    precision highp float;
-    ${FOG_GLSL}
-    uniform vec3 uWallA, uWallB, uRimC, uFillC, uWin0, uWin1, uWin2;
-    uniform float uTime;
-    varying vec3 vWorld, vNormal, vLocal, vSize, vNl;
-    varying vec4 vInfo;
-    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-    void main() {
-      vec3 N = normalize(vNormal);
-      float seed = vInfo.x;
-      vec3 wall = mix(uWallA, uWallB, hash(vec2(seed, 1.7)));
+      vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
+      vec3 N = normalize(mat3(instanceMatrix) * (normal / sc));
+      vec3 wall = mix(uWallA, uWallB, hash(vec2(aInfo.x, 1.7)));
       float roof = step(0.5, N.y);
       float fill = clamp(dot(N, normalize(vec3(-0.62, 0.42, 0.66))) * 0.5 + 0.5, 0.0, 1.0);
       float sun = pow(clamp(dot(N, uSunDir) * 0.5 + 0.5, 0.0, 1.0), 2.0);
       vec3 col = wall * (0.5 + 1.0 * fill) + uFillC * 0.07 * fill + uRimC * 0.55 * sun;
-      col = mix(col, wall * 1.5 + uRimC * 0.16, roof);
-      col *= mix(0.7, 1.08, clamp(vWorld.y / 160.0, 0.0, 1.0));
-
-      // windows on the walls
+      vBase = mix(col, wall * 1.5 + uRimC * 0.16, roof);
+      vRoof = roof;
+      vY = wp.y;
+      vPitch = vec2(3.6, 3.9) * (0.9 + 0.35 * hash(vec2(aInfo.x, 5.1)));
+      vec3 ray = wp.xyz - cameraPosition;
+      float dist = length(ray);
+      vFogF = (1.0 - exp(-dist * uFog)) * mix(1.0, 0.72, clamp(wp.y / 420.0, 0.0, 1.0));
+      float toward = pow(max(dot(ray / dist, uSunDir), 0.0), 7.0);
+      vFogC = mix(mix(uHazeLow, uHazeHigh, clamp(wp.y / 320.0, 0.0, 1.0)), uGlow, toward * 0.75);
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }`;
+  const CITY_FS = `
+    precision highp float;
+    uniform vec3 uWin0, uWin1, uWin2;
+    uniform float uTime;
+    ${GRAIN_GLSL}
+    varying vec3 vLocal, vSize, vNl, vBase, vFogC;
+    varying vec4 vInfo;
+    varying vec2 vPitch;
+    varying float vRoof, vFogF, vY;
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    void main() {
+      vec3 col = vBase * mix(0.7, 1.08, clamp(vY / 160.0, 0.0, 1.0));
       bool xFace = abs(vNl.x) > 0.5;
       vec2 fc = xFace ? vec2(vLocal.z + vSize.z * 0.5, vLocal.y) : vec2(vLocal.x + vSize.x * 0.5, vLocal.y);
       float faceW = xFace ? vSize.z : vSize.x;
-      vec2 pitch = vec2(3.6, 3.9) * (0.9 + 0.35 * hash(vec2(seed, 5.1)));
-      vec2 cell = floor(fc / pitch), f = fract(fc / pitch);
+      float detail = 1.0 - smoothstep(0.22, 0.55, fwidth(fc.x) / vPitch.x);
+      vec2 cell = floor(fc / vPitch), f = fract(fc / vPitch);
+      float wall = (1.0 - vRoof) * (1.0 - step(0.5, vInfo.y));
       float inWin = step(0.2, f.x) * step(f.x, 0.8) * step(0.26, f.y) * step(f.y, 0.82);
-      inWin *= step(pitch.x * 0.4, fc.x) * step(fc.x, faceW - pitch.x * 0.4) * step(fc.y, vSize.y - 1.5);
-      inWin *= (1.0 - roof) * (1.0 - step(0.5, vInfo.y));
-      float h = hash(cell + seed * 13.7);
+      inWin *= step(vPitch.x * 0.4, fc.x) * step(fc.x, faceW - vPitch.x * 0.4) * step(fc.y, vSize.y - 1.5) * wall;
+      float h = hash(cell + vInfo.x * 13.7);
       float reroll = step(0.94, h) * floor(uTime * 0.07 + h * 40.0);
-      float lit = step(1.0 - vInfo.z, hash(cell * 1.31 + seed * 7.1 + reroll));
-      float detail = 1.0 - smoothstep(0.22, 0.55, fwidth(fc.x) / pitch.x);
+      float lit = step(1.0 - vInfo.z, hash(cell * 1.31 + vInfo.x * 7.1 + reroll));
       vec3 wc = h < 0.6 ? uWin0 : (h < 0.88 ? uWin1 : uWin2);
       col = mix(col, col * 0.62, inWin * (1.0 - lit) * detail);
-      col = mix(col, wc * (0.75 + 0.5 * hash(cell + 2.2)), inWin * lit * detail);
-      col += wc * vInfo.z * 0.22 * (1.0 - detail) * (1.0 - roof) * (1.0 - step(0.5, vInfo.y));
-
-      gl_FragColor = vec4(applyFog(col, vWorld), 1.0);
+      col = mix(col, wc * (0.75 + 0.5 * fract(h * 17.31)), inWin * lit * detail);
+      col += wc * vInfo.z * 0.22 * (1.0 - detail) * wall;
+      gl_FragColor = vec4(grain(mix(col, vFogC, vFogF)), 1.0);
     }`;
 
   const GROUND_FS = `
     precision highp float;
     ${FOG_GLSL}
     uniform vec3 uInk;
+    uniform float uTime;
+    ${GRAIN_GLSL}
     varying vec3 vWorld;
-    void main() { gl_FragColor = vec4(applyFog(uInk, vWorld), 1.0); }`;
+    void main() { gl_FragColor = vec4(grain(applyFog(uInk, vWorld)), 1.0); }`;
 
   const LIGHT_VS = `
     attribute float aPhase;
@@ -185,9 +211,24 @@
     precision highp float;
     uniform vec3 uMask, uBody, uWeb, uFrame, uLens, uEmblem, uThread, uRim, uFill, uSun;
     uniform sampler2D uEyes, uSeamTex, uEmblemTex, uLut;
-    uniform float uSeam, uSheen, uDot, uFade;
+    uniform float uSeam, uSheen, uDot, uFade, uSquint, uTime;
     uniform vec4 uEyeRect, uSeamRect;
     varying vec3 vObj, vN, vV;
+    ${GRAIN_GLSL}
+
+    // The eye art is painted once, wide open. Squinting narrows it across its long axis,
+    // so each pixel looks up where it would have been before the squint.
+    const vec2 E_AX = vec2(0.7535, -0.6575);
+    const vec2 E_PT = vec2(0.37, -0.11);
+    vec2 unsquint(vec2 f) {
+      float side = f.x < 0.0 ? -1.0 : 1.0;
+      vec2 pe = vec2(-E_AX.y, E_AX.x);
+      vec2 v = vec2(f.x * side, f.y) - E_PT;
+      float along = dot(v, E_AX), across = dot(v, pe);
+      across /= across < 0.0 ? 1.0 - 0.5 * uSquint : 1.0 - 0.68 * uSquint;
+      vec2 b = E_PT + E_AX * along + pe * across;
+      return vec2(b.x * side, b.y);
+    }
 
     float line(float d, float w, float px) { return 1.0 - smoothstep(w - px, w + px, d); }
 
@@ -237,7 +278,7 @@
             base = mix(base, uThread, st.g);
           }
         }
-        vec2 eu = (f2 - uEyeRect.xy) / (uEyeRect.zw - uEyeRect.xy);
+        vec2 eu = (unsquint(f2) - uEyeRect.xy) / (uEyeRect.zw - uEyeRect.xy);
         if (eu.x > 0.0 && eu.x < 1.0 && eu.y > 0.0 && eu.y < 1.0 && p.z > 0.0) {
           vec3 et = texture2D(uEyes, eu).rgb;
           base = mix(base, uFrame, et.r);
@@ -280,7 +321,8 @@
       col += uRim * (sun * 0.95 + fres * sunSide * 1.5 * low) * (1.0 - lens * 0.6);
       col += uFill * fres * (1.0 - sunSide) * 0.55;
       col = mix(col, vec3(0.012, 0.016, 0.043), smoothstep(-1.9, -3.25, p.y) * 0.9);
-      gl_FragColor = vec4(col, uFade);
+      col *= mix(0.25, 1.0, uFade); // brief dip while the suit changes
+      gl_FragColor = vec4(grain(col), 1.0);
     }`;
 
   function color(hex) { const c = U.hexToRgb(hex); return new T.Vector3(c[0] / 255, c[1] / 255, c[2] / 255); }
@@ -297,11 +339,27 @@
     return out;
   }
 
+  /** True when WebGL is being drawn by the CPU (no usable graphics card). */
+  function softwareGL() {
+    try {
+      const c = document.createElement('canvas');
+      const gl = c.getContext('webgl2') || c.getContext('webgl');
+      if (!gl) return false;
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      const name = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+      const lose = gl.getExtension('WEBGL_lose_context');
+      if (lose) lose.loseContext();
+      return /swiftshader|llvmpipe|softpipe|software|basic render/i.test(name);
+    } catch (e) { return false; }
+  }
+
   function createStage(glCanvas, fxCanvas) {
-    const renderer = new T.WebGLRenderer({ canvas: glCanvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
+    const soft = softwareGL();
+    const budget = soft ? { floor: 0.2e6, low: 0.35e6, start: 0.5e6, high: 0.9e6 } : BUDGET;
+    const renderer = new T.WebGLRenderer({ canvas: glCanvas, antialias: !soft, alpha: false, stencil: false, powerPreference: 'high-performance' });
     renderer.autoClear = false;
     const fg = fxCanvas.getContext('2d');
-    const view = { w: 1920, h: 1080, scale: 1, cssW: 0, cssH: 0, res: 1 };
+    const view = { w: 1920, h: 1080, scale: 1, glScale: 1, cssW: 0, cssH: 0, res: 1 };
 
     const cityScene = new T.Scene(), heroScene = new T.Scene();
     const cityCam = new T.PerspectiveCamera(38, 16 / 9, 2, 14000);
@@ -314,10 +372,11 @@
     const cam = Object.assign({}, SHOTS.title);
     let shot = SHOTS.title, shotName = 'title';
     const pointer = { x: 0, y: 0, vx: 0, vy: 0, nx: 0, ny: 0, sx: 0, sy: 0, active: false };
-    const eyes = { squint: 0.05, drawn: -1, mood: 'neutral', blink: -1, nextBlink: 3.5, sheen: -1, nextSheen: 5, widen: 0 };
-    const opts = { motion: true, parallax: true };
+    const eyes = { squint: 0.05, mood: 'neutral', blink: -1, nextBlink: 3.5, sheen: -1, nextSheen: 5, widen: 0 };
+    const opts = { motion: true, parallax: true, grain: true };
+    const perf = { quality: 'auto', res: 1, min: 0.5, max: 1, ceiling: Infinity, ema: 16.7, slow: 0, fast: 0, cooldown: 0, lastDrop: null, stuck: false };
     const sunDir = new T.Vector3(0, 0.08, -1);
-    let running = false, last = 0, time = 0, idle = false, fpsCb = null, fpsAcc = 0, fpsN = 0;
+    let running = false, held = false, last = 0, time = 0, idle = false, fpsCb = null, fpsAcc = 0, fpsN = 0;
 
     /* ---------- shared uniforms ---------- */
     const lut = new T.CanvasTexture(U.makeCanvas(256, 2));
@@ -326,31 +385,31 @@
       uHazeLow: { value: new T.Vector3() }, uHazeHigh: { value: new T.Vector3() }, uGlow: { value: new T.Vector3() },
       uSunDir: { value: sunDir }, uFog: { value: 0.00052 },
     };
-    const timeU = { value: 0 };
+    const timeU = { value: 0 }, grainU = { value: 0.12 };
 
     /* ---------- sky ---------- */
     const skyMat = new T.ShaderMaterial({
-      vertexShader: SKY_VS, fragmentShader: SKY_FS, side: T.BackSide, depthTest: false, depthWrite: false,
+      vertexShader: SKY_VS, fragmentShader: SKY_FS, side: T.BackSide, depthTest: true, depthWrite: false,
       uniforms: {
         uLut: { value: lut }, uSunDir: { value: sunDir }, uCore: { value: new T.Vector3() }, uMid: { value: new T.Vector3() },
         uEdge: { value: new T.Vector3() }, uSunGlow: { value: new T.Vector3() }, uHalo: { value: new T.Vector3() },
         uRays: { value: new T.Vector4() }, uSunPx: { value: new T.Vector2() }, uSunRpx: { value: 200 },
-        uTime: timeU, uStars: { value: 1 }, uMotion: { value: 1 },
+        uTime: timeU, uStars: { value: 1 }, uMotion: { value: 1 }, uGrain: grainU,
       },
     });
     const sky = new T.Mesh(new T.SphereGeometry(1, 24, 16), skyMat);
-    sky.frustumCulled = false; sky.renderOrder = -10;
+    sky.frustumCulled = false; sky.renderOrder = 10; // after the city: only uncovered sky gets shaded
     cityScene.add(sky);
 
     /* ---------- city ---------- */
     const cityU = Object.assign({
       uWallA: { value: new T.Vector3() }, uWallB: { value: new T.Vector3() }, uRimC: { value: new T.Vector3() }, uFillC: { value: new T.Vector3() },
-      uWin0: { value: new T.Vector3() }, uWin1: { value: new T.Vector3() }, uWin2: { value: new T.Vector3() }, uTime: timeU,
+      uWin0: { value: new T.Vector3() }, uWin1: { value: new T.Vector3() }, uWin2: { value: new T.Vector3() }, uTime: timeU, uGrain: grainU,
     }, fogU);
     const cityMat = new T.ShaderMaterial({ vertexShader: CITY_VS, fragmentShader: CITY_FS, uniforms: cityU });
     const groundMat = new T.ShaderMaterial({
       vertexShader: 'varying vec3 vWorld; void main(){ vec4 wp = modelMatrix * vec4(position, 1.0); vWorld = wp.xyz; gl_Position = projectionMatrix * viewMatrix * wp; }',
-      fragmentShader: GROUND_FS, uniforms: Object.assign({ uInk: { value: new T.Vector3() } }, fogU),
+      fragmentShader: GROUND_FS, uniforms: Object.assign({ uInk: { value: new T.Vector3() }, uTime: timeU, uGrain: grainU }, fogU),
     });
     const lightMat = new T.ShaderMaterial({
       vertexShader: LIGHT_VS, fragmentShader: LIGHT_FS, uniforms: { uTime: timeU, uPx: { value: 14 } },
@@ -416,6 +475,17 @@
       lm(sunAz - 0.058, 1750, 455, 86);
       lm(sunAz + 0.034, 2350, 400, 70);
 
+      // drop what the camera never sees: everything outside its widest view, beyond the nearest blocks
+      const inView = (x, z) => { const d = Math.hypot(x, z); return Math.abs(Math.atan2(x, -z)) <= (d < 450 ? 1.02 : 0.8); };
+      const visible = (list) => list.filter((o) => inView(o.x, o.z));
+      const kept = { boxes: visible(boxes), tanks: visible(tanks), cones: visible(cones), lights: [] };
+      for (let i = 0; i < lights.length; i += 3) if (inView(lights[i], lights[i + 2])) kept.lights.push(lights[i], lights[i + 1], lights[i + 2]);
+      boxes.length = 0; boxes.push(...kept.boxes);
+      tanks.length = 0; tanks.push(...kept.tanks);
+      cones.length = 0; cones.push(...kept.cones);
+      lights.length = 0; lights.push(...kept.lights);
+      // nearest first: the depth test then throws away hidden walls before they are shaded
+      boxes.sort((a, b) => (a.x * a.x + a.z * a.z) - (b.x * b.x + b.z * b.z));
       const quat = new T.Quaternion().setFromAxisAngle(new T.Vector3(0, 1, 0), -GRID);
       const m = new T.Matrix4(), v = new T.Vector3(), s = new T.Vector3();
       const boxGeo = new T.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
@@ -440,7 +510,7 @@
 
       // water towers: tank, cap and four legs merged into one small model
       const legs = [[-1.8, -1.8], [1.8, -1.8], [-1.8, 1.8], [1.8, 1.8]].map(([lx, lz]) => new T.BoxGeometry(0.32, 4.8, 0.32).translate(lx, 2.4, lz));
-      const tankGeo = mergeGeometries([new T.CylinderGeometry(2.7, 2.7, 4.6, 12).translate(0, 7, 0), new T.ConeGeometry(3.05, 2, 12).translate(0, 10.3, 0)].concat(legs));
+      const tankGeo = mergeGeometries([new T.CylinderGeometry(2.7, 2.7, 4.6, 9, 1, true).translate(0, 7, 0), new T.ConeGeometry(3.05, 2, 9, 1, true).translate(0, 10.3, 0)].concat(legs));
       const tInfo = new Float32Array(tanks.length * 4);
       const tMesh = new T.InstancedMesh(tankGeo, cityMat, Math.max(1, tanks.length));
       tanks.forEach((t, i) => { m.compose(v.set(t.x, t.y, t.z), quat, s.set(t.s, t.s, t.s)); tMesh.setMatrixAt(i, m); tInfo.set([3.3, 1, 0, 0], i * 4); });
@@ -464,6 +534,7 @@
     const eyeCanvas = U.makeCanvas(1024, 628), seamCanvas = U.makeCanvas(528, 640), emblemCanvas = U.makeCanvas(384, 506);
     const tex = (c) => { const t = new T.CanvasTexture(c); t.flipY = false; t.generateMipmaps = false; t.minFilter = t.magFilter = T.LinearFilter; return t; };
     SMR.heroArt.paintSeam(seamCanvas);
+    SMR.heroArt.paintEyes(eyeCanvas, 0);
     SMR.heroArt.paintEmblem(emblemCanvas);
     const eyeTex = tex(eyeCanvas), seamTex = tex(seamCanvas), emblemTex = tex(emblemCanvas);
     const ER = SMR.heroArt.EYE_RECT, SR = SMR.heroArt.SEAM_RECT;
@@ -472,7 +543,7 @@
       uLens: { value: new T.Vector3() }, uEmblem: { value: new T.Vector3() }, uThread: { value: new T.Vector3() },
       uRim: { value: new T.Vector3() }, uFill: { value: new T.Vector3() }, uSun: { value: new T.Vector3(-0.74, 0.2, -0.64).normalize() },
       uEyes: { value: eyeTex }, uSeamTex: { value: seamTex }, uEmblemTex: { value: emblemTex }, uLut: { value: lut },
-      uSeam: { value: 1 }, uSheen: { value: -1 }, uDot: { value: 7 }, uFade: { value: 1 },
+      uSeam: { value: 1 }, uSheen: { value: -1 }, uDot: { value: 7 }, uFade: { value: 1 }, uSquint: { value: 0.05 }, uTime: timeU, uGrain: grainU,
       uEyeRect: { value: new T.Vector4(ER[0], ER[1], ER[2], ER[3]) }, uSeamRect: { value: new T.Vector4(SR[0], SR[1], SR[2], SR[3]) },
       uYaw: { value: 0 }, uPitch: { value: 0 },
     };
@@ -531,18 +602,62 @@
       heroCam.updateProjectionMatrix();
     }
 
+    function pickRes() {
+      const dpr = window.devicePixelRatio || 1, area = view.cssW * view.cssH;
+      const fit = (px) => Math.sqrt(px / area);
+      perf.min = Math.min(dpr, Math.max(soft ? 0.3 : 0.5, fit(budget.floor)));
+      perf.max = perf.quality === 'low' ? Math.min(dpr, Math.max(perf.min, fit(budget.low))) : Math.min(dpr, 2, fit(budget.high));
+      const start = perf.quality === 'auto' ? Math.min(perf.max, fit(budget.start), perf.ceiling) : perf.max;
+      return Math.max(perf.min, start);
+    }
+
+    /** Change only the drawing resolution; the layout and the city stay as they are. */
+    function applyRes(res) {
+      perf.res = view.res = res;
+      renderer.setPixelRatio(res);
+      renderer.setSize(view.cssW, view.cssH, false);
+      const fxRes = Math.min(res, 1.25);
+      fxCanvas.width = Math.round(view.cssW * fxRes); fxCanvas.height = Math.round(view.cssH * fxRes);
+      view.scale = fxCanvas.height / 1080;
+      view.glScale = renderer.domElement.height / 1080;
+      view.w = (view.cssW / view.cssH) * 1080; view.h = 1080;
+      heroU.uDot.value = Math.max(4, 7.2 * view.glScale);
+      lightMat.uniforms.uPx.value = 15 * view.glScale;
+    }
+    function setRes(res) { applyRes(res); perf.slow = perf.fast = 0; perf.ema = 16.7; perf.cooldown = 500; }
+
+    /** Auto quality: lower the resolution while frames run slow, try a little higher after a long smooth stretch. */
+    function adapt(gap) {
+      if (perf.quality !== 'auto') return;
+      if (perf.cooldown > 0) { perf.cooldown -= gap; return; }
+      gap = Math.min(gap, 100);
+      perf.ema += (gap - perf.ema) * 0.08;
+      if (perf.ema > 23) {
+        perf.slow += gap; perf.fast = 0;
+        if (perf.slow > 700 && !perf.stuck && perf.res > perf.min + 0.01) {
+          if (perf.lastDrop && perf.ema > perf.lastDrop.ema * 0.9) {
+            // the last drop did not help, so something else caps the frame rate (battery saver, a 30 Hz screen)
+            perf.stuck = true; setRes(perf.lastDrop.res); return;
+          }
+          perf.lastDrop = { res: perf.res, ema: perf.ema };
+          perf.ceiling = perf.res * 0.94;
+          setRes(Math.max(perf.min, perf.res * 0.8));
+        }
+      } else if (perf.ema < 18.5) {
+        perf.fast += gap; perf.slow = 0;
+        if (perf.fast > 6000) {
+          perf.fast = 0;
+          const next = Math.min(perf.max, perf.ceiling, perf.res * 1.12);
+          if (next > perf.res + 0.02) setRes(next);
+        }
+      } else { perf.slow = Math.max(0, perf.slow - gap); perf.fast = 0; }
+    }
+
     function resize() {
       const cssW = glCanvas.clientWidth || window.innerWidth, cssH = glCanvas.clientHeight || window.innerHeight;
       if (!cssW || !cssH) return;
-      view.res = Math.min(window.devicePixelRatio || 1, 2, 2560 / cssW);
       view.cssW = cssW; view.cssH = cssH;
-      renderer.setPixelRatio(view.res);
-      renderer.setSize(cssW, cssH, false);
-      fxCanvas.width = Math.round(cssW * view.res); fxCanvas.height = Math.round(cssH * view.res);
-      view.scale = fxCanvas.height / 1080;
-      view.w = fxCanvas.width / view.scale; view.h = 1080;
-      heroU.uDot.value = Math.max(4, 7.2 * view.scale);
-      lightMat.uniforms.uPx.value = 15 * view.scale;
+      applyRes(pickRes());
       layout();
       applyPalette();
       buildCity();
@@ -599,7 +714,7 @@
       const sp = sunDir.clone().multiplyScalar(5000).add(cityCam.position).project(cityCam);
       const pxH = renderer.domElement.height, pxW = renderer.domElement.width;
       skyMat.uniforms.uSunPx.value.set((sp.x * 0.5 + 0.5) * pxW, (sp.y * 0.5 + 0.5) * pxH);
-      skyMat.uniforms.uSunRpx.value = orb.r * view.scale * (38 / cam.fov);
+      skyMat.uniforms.uSunRpx.value = orb.r * view.glScale * (38 / cam.fov);
       skyMat.uniforms.uMotion.value = opts.motion ? 1 : 0;
       timeU.value = time;
 
@@ -613,12 +728,8 @@
       heroU.uYaw.value = pointer.sx * 0.42 - 0.06;
       heroU.uPitch.value = pointer.sy * 0.2;
       heroU.uSheen.value = eyes.sheen;
-      heroU.uFade.value = 1;
-      if (Math.abs(eyes.squint - eyes.drawn) > 0.008) { SMR.heroArt.paintEyes(eyeCanvas, eyes.squint); eyeTex.needsUpdate = true; eyes.drawn = eyes.squint; }
-      // a quick dip to black hides the colour swap when the suit changes
-      const dip = U.smooth(U.clamp(suitFade, 0, 1));
-      if (dip < 1) { for (const key of ['uMask', 'uBody']) heroU[key].value.multiplyScalar(1); }
-      heroMat.uniforms.uFade.value = dip;
+      heroU.uSquint.value = eyes.squint;
+      heroU.uFade.value = U.smooth(U.clamp(suitFade, 0, 1)); // a quick dip hides the colour swap
 
       renderer.clear();
       renderer.render(cityScene, cityCam);
@@ -640,11 +751,16 @@
     function frame(now) {
       if (!running) return;
       requestAnimationFrame(frame);
-      const dt = Math.min(0.05, (now - last) / 1000 || 0.016);
-      last = now; time += dt;
+      const gap = now - last;
+      if (gap < MIN_GAP) return; // high-refresh screens: no need to draw more than ~60-70 times a second
+      last = now;
+      const dt = Math.min(0.05, gap / 1000 || 0.016);
+      time += dt;
       update(dt); render();
-      if (fpsCb) { fpsAcc += dt; fpsN++; if (fpsAcc >= 0.5) { fpsCb(Math.round(fpsN / fpsAcc)); fpsAcc = 0; fpsN = 0; } }
+      adapt(gap);
+      if (fpsCb) { fpsAcc += gap / 1000; fpsN++; if (fpsAcc >= 0.5) { fpsCb(Math.round(fpsN / fpsAcc), Math.round(renderer.domElement.height)); fpsAcc = 0; fpsN = 0; } }
     }
+    function start() { if (running || held) return; running = true; last = performance.now(); requestAnimationFrame(frame); }
 
     function toVirtual(clientX, clientY) {
       const rect = glCanvas.getBoundingClientRect();
@@ -653,8 +769,15 @@
 
     return {
       resize,
-      start() { if (running) return; running = true; last = performance.now(); requestAnimationFrame(frame); },
+      start,
       stop() { running = false; },
+      /** Stop drawing while something opaque covers the whole view. */
+      hold(v) { held = v; if (v) running = false; else start(); },
+      setQuality(q) {
+        if (q === perf.quality) return;
+        perf.quality = q; perf.ceiling = Infinity; perf.stuck = false; perf.lastDrop = null;
+        if (view.cssW) setRes(pickRes());
+      },
       setShot(name, instant) {
         if (!SHOTS[name]) return;
         shot = SHOTS[name]; shotName = name;
@@ -671,7 +794,7 @@
         pal = next;
         if (view.cssW) { applyPalette(); buildCity(); webSim.rebuild(view, pal); fx.rebuild(view, pal); }
       },
-      setOptions(o) { Object.assign(opts, o); },
+      setOptions(o) { Object.assign(opts, o); grainU.value = opts.grain ? 0.12 : 0; },
       setMood(mood) { if (mood in MOODS) eyes.mood = mood; },
       react() { eyes.widen = 0.5; if (eyes.sheen < 0) eyes.sheen = 0; },
       setIdle(v) { idle = v; },
@@ -690,7 +813,7 @@
         eyes.widen = 0.35;
       },
       step(dt) { time += dt; update(dt); render(); },
-      debug: { view, hero, orb, cam, eyes, pointer },
+      debug: { view, hero, orb, cam, eyes, pointer, perf, renderer, sky, cityGroup, heroMesh, fxCanvas, soft },
     };
   }
 
