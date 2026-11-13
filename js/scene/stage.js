@@ -193,7 +193,7 @@
 
   const HERO_VS = `
     uniform float uYaw, uPitch;
-    varying vec3 vObj, vN, vV;
+    varying vec3 vObj, vN, vV, vW;
     mat3 rotY(float a) { float c = cos(a), s = sin(a); return mat3(c, 0.0, -s, 0.0, 1.0, 0.0, s, 0.0, c); }
     mat3 rotX(float a) { float c = cos(a), s = sin(a); return mat3(1.0, 0.0, 0.0, 0.0, c, s, 0.0, -s, c); }
     void main() {
@@ -203,6 +203,7 @@
       vec3 pivot = vec3(0.0, -1.1, -0.2);
       vec3 p = pivot + R * (position - pivot);
       vec4 wp = modelMatrix * vec4(p, 1.0);
+      vW = wp.xyz;
       vN = normalize(mat3(modelMatrix) * (R * normal));
       vV = normalize(cameraPosition - wp.xyz);
       gl_Position = projectionMatrix * viewMatrix * wp;
@@ -210,11 +211,19 @@
   const HERO_FS = `
     precision highp float;
     uniform vec3 uMask, uBody, uWeb, uFrame, uLens, uEmblem, uThread, uRim, uFill, uSun;
-    uniform sampler2D uEyes, uSeamTex, uEmblemTex, uLut;
-    uniform float uSeam, uSheen, uDot, uFade, uSquint, uTime;
+    uniform sampler2D uEyes, uSeamTex, uEmblemTex, uLut, uEyeRel, uSeamRel, uEmblemRel;
+    uniform vec2 uEyeK, uSeamK, uEmblemK;
+    uniform float uSeam, uSheen, uDot, uFade, uSquint, uTime, uScale, uRelief;
     uniform vec4 uEyeRect, uSeamRect;
-    varying vec3 vObj, vN, vV;
+    varying vec3 vObj, vN, vV, vW;
     ${GRAIN_GLSL}
+
+    // How far each raised part stands off the suit, in model units (the head is 2 units tall).
+    const float WEB_W = 0.0098, WEB_H = 0.0052;  // web threads: half width, height
+    const float PIPE_W = 0.017, PIPE_H = 0.009;  // piping where the red meets the blue
+    const float EYE_H = 0.017, SEAM_H = 0.008, MARK_H = 0.0095;
+    const vec3 KEY = vec3(0.3487, 0.4483, 0.8235); // key light, front right and above
+    const vec2 KEY2 = vec2(0.6139, 0.7894);        // the same light's direction on screen
 
     // The eye art is painted once, wide open. Squinting narrows it across its long axis,
     // so each pixel looks up where it would have been before the squint.
@@ -230,9 +239,9 @@
       return vec2(b.x * side, b.y);
     }
 
-    float line(float d, float w, float px) { return 1.0 - smoothstep(w - px, w + px, d); }
-
-    float headWeb(vec3 p, float px) {
+    // Distance (model units) to the nearest radial and nearest ring thread of the mask web,
+    // and the angle from the web's centre between the eyes.
+    vec3 headWeb(vec3 p) {
       vec3 d = normalize(p - vec3(0.0, -0.07, 0.0));
       float pol = acos(clamp(d.z, -1.0, 1.0));
       float seg = 6.2831853 / 16.0;
@@ -241,9 +250,10 @@
       float pa = pol / (1.0 - 0.11 * 4.0 * fr * (1.0 - fr));
       float frr = fract((pa - 0.03) / 0.172);
       float ring = min(frr, 1.0 - frr) * 0.172 * 0.8 + step(pa, 0.1);
-      return max(line(rad, 0.0078, px), line(ring, 0.0078, px));
+      return vec3(rad, ring, pol);
     }
-    float chestWeb(vec2 p, float px) {
+    // The same for the chest web, which fans out from under the chin.
+    vec2 chestWeb(vec2 p) {
       vec2 v = p - vec2(0.0, 0.42);
       float r = length(v), seg = 3.14159265 / 22.0;
       float fr = fract(atan(v.y, v.x) / seg);
@@ -252,7 +262,46 @@
       float k = log(1.255);
       float frr = fract(log(ra / 0.78) / k);
       float ring = min(frr, 1.0 - frr) * k * ra;
-      return max(line(rad, 0.0078, px), line(ring, 0.0078, px)) * step(0.6, r);
+      return vec2(rad, ring) + step(r, 0.6);
+    }
+
+    // A raised cord with a rounded top, d from its centre line:
+    // x = height 0..1, y = how the height changes with d, z = coverage (antialiased).
+    vec3 cord(float d, float w, float px) {
+      float t = min(d / w, 0.95), s = sqrt(1.0 - t * t);
+      return vec3(s, -t / (s * w), 1.0) * (1.0 - smoothstep(w - px, w + px, d));
+    }
+
+    // Raised web threads from two distance fields and their per-pixel change (dx, dy).
+    // Adds the slope to g and a contact shadow to ao; returns how much thread covers the pixel.
+    // lift scales the height (the threads flatten where many of them meet).
+    float webRelief(vec2 d, vec2 dx, vec2 dy, float px, float amount, float lift, inout vec2 g, inout float ao) {
+      vec3 a = cord(d.x, WEB_W, px) * amount, b = cord(d.y, WEB_W, px) * amount;
+      g += WEB_H * lift * (a.x >= b.x ? a.y * vec2(dx.x, dy.x) : b.y * vec2(dx.y, dy.y));
+      float cov = max(a.z, b.z);
+      bool nx = d.x < d.y;
+      float dn = nx ? d.x : d.y;
+      vec2 gd = nx ? vec2(dx.x, dy.x) : vec2(dx.y, dy.y);
+      // the thread throws its shadow away from the light, so the shadow is wider on that side
+      float lit = dot(gd, KEY2) / (length(gd) + 1e-9);
+      float reach = WEB_W * mix(2.7, 0.45, lit * 0.5 + 0.5);
+      ao = max(ao, (1.0 - smoothstep(WEB_W, WEB_W + reach, dn)) * (1.0 - cov) * amount * lift);
+      return cov;
+    }
+
+    // Slope (per unit of texture coordinate), height and contact shadow from a relief map.
+    vec4 relief(sampler2D t, vec2 uv, vec2 k) {
+      vec4 r = texture2D(t, uv);
+      return vec4((r.rg * 255.0 - 128.0) / 127.0 * k, r.b, r.a);
+    }
+    float inBox(vec2 uv) { return step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0); }
+
+    // Fabric weave: shallow ribs along directions a and b, worked out in 3D so it wraps the
+    // body without seams. Returns the height change per pixel; fades out before it can shimmer.
+    vec2 weave(vec3 p, vec3 oX, vec3 oY, float period, vec3 a, vec3 b, float px) {
+      float k = 6.2831853 / period;
+      vec3 grad = (cos(k * dot(p, a)) * a + cos(k * dot(p, b)) * b) * (0.5 * k);
+      return vec2(dot(grad, oX), dot(grad, oY)) * (1.0 - smoothstep(period * 0.16, period * 0.36, px));
     }
     float yokeW(float y) {
       float w = mix(0.52, 1.12, smoothstep(1.06, 1.42, y));
@@ -263,55 +312,112 @@
       vec3 p = vObj;
       vec2 f2 = vec2(p.x, -p.y); // face plane, y down, same units the artwork is drawn in
       vec3 N = normalize(vN), V = normalize(vV);
-      float px = (fwidth(p.x) + fwidth(p.y) + fwidth(p.z)) * 0.6;
+      vec3 fw = fwidth(p);
+      float px = (fw.x + fw.y + fw.z) * 0.6;
       float front = smoothstep(0.0, 0.25, p.z);
 
-      vec3 base;
+      // Every pattern is measured up here, outside the branches below, so the screen-space
+      // derivatives stay well defined: each says how fast that pattern changes per pixel.
+      vec3 hw = headWeb(p);
+      vec2 cw = chestWeb(f2);
+      float yd = abs(p.x) - yokeW(f2.y); // across the edge of the red yoke
+      vec2 eu = (unsquint(f2) - uEyeRect.xy) / (uEyeRect.zw - uEyeRect.xy);
+      vec2 su = (f2 - uSeamRect.xy) / (uSeamRect.zw - uSeamRect.xy);
+      vec2 mu = vec2(p.x / 1.26 + 0.5, (f2.y - 2.12) / 1.659 + 0.481);
+      vec4 webX = dFdx(vec4(hw.xy, cw)), webY = dFdy(vec4(hw.xy, cw));
+      vec4 artX = dFdx(vec4(eu, su)), artY = dFdy(vec4(eu, su));
+      vec3 mX = dFdx(vec3(mu, yd)), mY = dFdy(vec3(mu, yd));
+      vec3 wX = dFdx(vW), wY = dFdy(vW), oX = dFdx(p), oY = dFdy(p);
+
+      // the cloth itself: a fine twill on the red, a ribbed knit on the blue
+      vec2 twill = weave(p, oX, oY, 0.021, vec3(0.8, 0.6, 0.0), vec3(-0.6, 0.8, 0.0), px);
+      vec2 rib = weave(p, oX, oY, 0.034, vec3(0.0, 0.96, 0.28), vec3(0.0, 0.96, 0.28), px);
+
+      vec2 g = vec2(0.0);  // how the height of the raised detail changes per pixel (x, y)
+      float ao = 0.0;      // contact shadow beside raised parts
+      float rub = 0.0;     // 0 soft fabric … 1 rubbery print or thread
       float gloss = 0.0, lens = 0.0;
+      vec3 base;
       if (p.y > -1.0) {
-        base = mix(uMask, uWeb, headWeb(p, px) * 0.94);
-        if (uSeam > 0.5) {
-          vec2 su = (f2 - uSeamRect.xy) / (uSeamRect.zw - uSeamRect.xy);
-          if (su.x > 0.0 && su.x < 1.0 && su.y > 0.0 && su.y < 1.0) {
-            vec3 st = texture2D(uSeamTex, su).rgb * front;
-            base = mix(base, base * 0.3, st.r);
-            base = mix(base, uThread, st.g);
-          }
+        g = twill * 0.0007;
+        float hub = smoothstep(0.05, 0.2, hw.z); // flatter and matte where the threads all meet
+        float cov = webRelief(hw.xy, webX.xy, webY.xy, px, 1.0, hub, g, ao);
+        base = mix(uMask, uWeb, cov * 0.95);
+        rub = cov * hub;
+        if (uSeam > 0.5 && inBox(su) > 0.5) {
+          vec3 st = texture2D(uSeamTex, su).rgb * front;
+          vec4 rl = relief(uSeamRel, su, uSeamK) * front;
+          base = mix(base, base * 0.3, st.r);
+          base = mix(base, uThread, st.g);
+          g = g * (1.0 - max(st.r, st.g)) + SEAM_H * vec2(dot(rl.xy, artX.zw), dot(rl.xy, artY.zw));
+          ao = max(ao * (1.0 - st.g), rl.w);
+          rub = max(rub, st.g * 0.6);
         }
-        vec2 eu = (unsquint(f2) - uEyeRect.xy) / (uEyeRect.zw - uEyeRect.xy);
-        if (eu.x > 0.0 && eu.x < 1.0 && eu.y > 0.0 && eu.y < 1.0 && p.z > 0.0) {
+        if (inBox(eu) > 0.5 && p.z > 0.0) {
           vec3 et = texture2D(uEyes, eu).rgb;
+          vec4 rl = relief(uEyeRel, eu, uEyeK);
           base = mix(base, uFrame, et.r);
           lens = et.g;
           gloss = et.b;
+          g = g * (1.0 - et.r) + EYE_H * vec2(dot(rl.xy, artX.xy), dot(rl.xy, artY.xy));
+          ao = max(ao * (1.0 - et.r), rl.w);
+          rub = max(rub, et.r);
         }
       } else {
-        float w = yokeW(f2.y), ax = abs(p.x);
-        vec3 red = mix(uMask * 0.9, uWeb, chestWeb(f2, px) * 0.9);
-        base = mix(uBody, red, 1.0 - smoothstep(w - px, w + px, ax));
-        base = mix(base, uWeb, line(abs(ax - w), 0.016, px));
-        vec2 mu = vec2(p.x / 1.26 + 0.5, (f2.y - 2.12) / 1.659 + 0.481);
-        if (mu.x > 0.0 && mu.x < 1.0 && mu.y > 0.0 && mu.y < 1.0) base = mix(base, uEmblem, texture2D(uEmblemTex, mu).r * front);
+        float red = 1.0 - smoothstep(-px, px, yd);
+        g = mix(rib * 0.0011, twill * 0.0007, red);
+        float cov = webRelief(cw, webX.zw, webY.zw, px, red, 1.0, g, ao);
+        base = mix(mix(uBody, uMask * 0.9, red), uWeb, cov * 0.94);
+        // rounded piping along the edge of the red, with its own shadow
+        vec3 pipe = cord(abs(yd), PIPE_W, px);
+        vec2 yg = vec2(mX.z, mY.z) * sign(yd);
+        g = g * (1.0 - pipe.z) + PIPE_H * pipe.y * yg;
+        float lit = dot(yg, KEY2) / (length(yg) + 1e-9);
+        ao = max(ao, (1.0 - smoothstep(PIPE_W, PIPE_W * mix(2.6, 1.3, lit * 0.5 + 0.5), abs(yd))) * (1.0 - pipe.z));
+        base = mix(base, uWeb, pipe.z);
+        rub = max(cov, pipe.z);
+        if (inBox(mu) > 0.5) {
+          float m = texture2D(uEmblemTex, mu).r * front;
+          vec4 rl = relief(uEmblemRel, mu, uEmblemK) * front;
+          base = mix(base, uEmblem, m);
+          g = g * (1.0 - m) + MARK_H * vec2(dot(rl.xy, mX.xy), dot(rl.xy, mY.xy));
+          ao = max(ao * (1.0 - m), rl.w);
+          rub = max(rub * (1.0 - m), m * 0.8);
+        }
       }
 
+      // Bend the normal by the relief (surface-gradient bump mapping, in world space).
+      vec2 gs = g * uScale * uRelief;
+      vec3 r1 = cross(wY, N), r2 = cross(N, wX);
+      float det = dot(wX, r1);
+      vec3 nb = abs(det) * N - sign(det) * (gs.x * r1 + gs.y * r2);
+      vec3 Nb = dot(nb, nb) > 1e-30 ? normalize(nb) : N;
+      ao *= uRelief;
+
       // light: a soft key from the front, the sun raking in from behind, sky fill opposite
-      float key = clamp(dot(N, normalize(vec3(0.35, 0.45, 0.82))) * 0.5 + 0.5, 0.0, 1.0);
-      float sun = max(dot(N, uSun), 0.0);
+      float keyM = clamp(dot(N, KEY) * 0.5 + 0.5, 0.0, 1.0); // the big forms only
+      float key = clamp(dot(Nb, KEY) * 0.5 + 0.5, 0.0, 1.0);
+      float sun = max(dot(Nb, uSun), 0.0);
       float fres = pow(1.0 - max(dot(N, V), 0.0), 2.6);
       float sunSide = smoothstep(-0.35, 0.5, dot(N, uSun));
-      vec3 col = base * (0.2 + 0.95 * key * key);
+      vec3 col = base * (0.2 + 0.95 * key * key) * (1.0 - 0.62 * ao);
 
-      // screen-print dots in the shadows
-      float shade = clamp(1.0 - key * 1.25, 0.0, 1.0);
+      // screen-print dots in the shadows, following the big forms rather than the fine relief
+      float shade = clamp(1.0 - keyM * 1.25, 0.0, 1.0);
       vec2 q = mat2(0.7071, -0.7071, 0.7071, 0.7071) * gl_FragCoord.xy / uDot;
       float hr = 0.52 * sqrt(shade);
       float dots = (1.0 - smoothstep(hr - 0.09, hr + 0.09, length(fract(q) - 0.5))) * step(0.04, hr);
       col = mix(col, col * 0.42, dots * 0.6 * (1.0 - lens));
 
-      // lenses: pale glass that mirrors the sky
-      vec3 R = reflect(-V, N);
+      // highlights: a broad sheen on the fabric, a tight one on the rubbery raised parts
+      float nh = max(dot(Nb, normalize(KEY + V)), 0.0);
+      float spec = mix(0.07 * pow(nh, 8.0), 0.62 * pow(nh, 34.0), rub) * uRelief;
+      col += spec * vec3(1.0, 0.95, 0.88) * (1.0 - lens);
+
+      // lenses: pale glass that mirrors the sky, curved so the reflection bends at the rim
+      vec3 R = reflect(-V, Nb);
       vec3 skyR = texture2D(uLut, vec2(clamp(0.74 - R.y * 0.85, 0.02, 0.98), 0.5)).rgb;
-      vec3 lc = mix(uLens, skyR, 0.2) * (0.72 + 0.4 * key);
+      vec3 lc = mix(uLens, skyR, 0.2) * (0.72 + 0.4 * key) * (1.0 - 0.5 * ao);
       lc += gloss * 0.34 + pow(max(dot(R, uSun), 0.0), 24.0) * uRim * 0.8;
       float sweep = 1.0 - smoothstep(0.0, 0.16, abs(f2.x + f2.y * 0.32 - mix(-1.0, 1.0, uSheen)));
       lc += sweep * step(0.0, uSheen) * 0.75;
@@ -538,11 +644,21 @@
     SMR.heroArt.paintEmblem(emblemCanvas);
     const eyeTex = tex(eyeCanvas), seamTex = tex(seamCanvas), emblemTex = tex(emblemCanvas);
     const ER = SMR.heroArt.EYE_RECT, SR = SMR.heroArt.SEAM_RECT;
+    // relief maps: height for the lens frames, chest mark and stitches
+    const relTex = (m) => {
+      const t = new T.DataTexture(m.data, m.w, m.h, T.RGBAFormat);
+      t.minFilter = t.magFilter = T.LinearFilter; t.generateMipmaps = false; t.needsUpdate = true;
+      return t;
+    };
+    const flat = { data: new Uint8Array([128, 128, 0, 0]), w: 1, h: 1, k: [0, 0] }; // until the real ones are ready
     const heroU = {
       uMask: { value: new T.Vector3() }, uBody: { value: new T.Vector3() }, uWeb: { value: new T.Vector3() }, uFrame: { value: new T.Vector3() },
       uLens: { value: new T.Vector3() }, uEmblem: { value: new T.Vector3() }, uThread: { value: new T.Vector3() },
       uRim: { value: new T.Vector3() }, uFill: { value: new T.Vector3() }, uSun: { value: new T.Vector3(-0.74, 0.2, -0.64).normalize() },
       uEyes: { value: eyeTex }, uSeamTex: { value: seamTex }, uEmblemTex: { value: emblemTex }, uLut: { value: lut },
+      uEyeRel: { value: relTex(flat) }, uSeamRel: { value: relTex(flat) }, uEmblemRel: { value: relTex(flat) },
+      uEyeK: { value: new T.Vector2() }, uSeamK: { value: new T.Vector2() }, uEmblemK: { value: new T.Vector2() },
+      uScale: { value: 1 }, uRelief: { value: 1 },
       uSeam: { value: 1 }, uSheen: { value: -1 }, uDot: { value: 7 }, uFade: { value: 1 }, uSquint: { value: 0.05 }, uTime: timeU, uGrain: grainU,
       uEyeRect: { value: new T.Vector4(ER[0], ER[1], ER[2], ER[3]) }, uSeamRect: { value: new T.Vector4(SR[0], SR[1], SR[2], SR[3]) },
       uYaw: { value: 0 }, uPitch: { value: 0 },
@@ -556,6 +672,26 @@
     const heroMesh = new T.Mesh(heroGeo, heroMat);
     heroMesh.frustumCulled = false;
     heroScene.add(heroMesh);
+
+    // The relief maps take a moment to build, so they are made in idle time after the
+    // first frames are up (one per slot) instead of holding up the start.
+    const reliefJobs = [
+      ['uEyeRel', 'uEyeK', () => SMR.heroArt.eyeRelief(512, 314)],
+      ['uEmblemRel', 'uEmblemK', () => SMR.heroArt.emblemRelief(384, 506)],
+      ['uSeamRel', 'uSeamK', () => SMR.heroArt.seamRelief(264, 320)],
+    ];
+    const whenIdle = window.requestIdleCallback ? (f) => window.requestIdleCallback(f, { timeout: 300 }) : (f) => setTimeout(f, 40);
+    (function nextRelief() {
+      const job = reliefJobs.shift();
+      if (!job) return;
+      whenIdle(() => {
+        const m = job[2]();
+        heroU[job[0]].value.dispose();
+        heroU[job[0]].value = relTex(m);
+        heroU[job[1]].value.set(m.k[0], m.k[1]);
+        nextRelief();
+      });
+    })();
     let suitFade = 1, suitNext = null;
 
     function applySuit(s) {
@@ -724,6 +860,7 @@
       const hx = hero.x + cam.hx - pointer.sx * 30 - drift * 12, hy = hero.y + cam.hy - pointer.sy * 12 + breath * 2.2;
       heroMesh.position.set((hx - view.w / 2) / unit, (540 - hy) / unit, 0);
       heroMesh.scale.setScalar((hero.ppu / unit) * cam.hs);
+      heroU.uScale.value = heroMesh.scale.x;
       heroMesh.rotation.set(0, Math.atan2(heroMesh.position.x, HERO_DIST) * 0.9 + pointer.sx * 0.1, -0.03, 'YXZ');
       heroU.uYaw.value = pointer.sx * 0.42 - 0.06;
       heroU.uPitch.value = pointer.sy * 0.2;

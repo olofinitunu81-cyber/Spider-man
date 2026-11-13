@@ -1,5 +1,6 @@
-/* 2D artwork that gets wrapped onto the 3D hero: the eye shapes (redrawn whenever
-   he squints or blinks), the hand-stitched seam, and the chest mark. */
+/* 2D artwork that gets wrapped onto the 3D hero: the eye shapes (painted once, wide
+   open; the shader narrows them for a squint), the hand-stitched seam, the chest mark,
+   and relief maps made from the same shapes so they have real height. */
 (function () {
   'use strict';
   const SMR = window.SMR;
@@ -122,5 +123,127 @@
     g.fill();
   }
 
-  SMR.heroArt = { eyePath, paintEyes, paintSeam, paintEmblem, EYE_RECT, SEAM_RECT };
+  /* ---- relief maps ----
+     The same artwork turned into height, so the lens frames, chest mark and stitches stand
+     off the suit and catch the light. Each map is RGBA bytes:
+     r, g = slope across and down (signed, 128 = flat), b = height, a = contact shadow. */
+
+  function channel(canvas, c) {
+    const d = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    const out = new Float32Array(canvas.width * canvas.height);
+    for (let i = 0; i < out.length; i++) out[i] = d[i * 4 + c] / 255;
+    return out;
+  }
+
+  // one box-blur pass along rows (step 1) or columns (step w), edges clamped
+  function box(src, dst, w, h, r, alongRows) {
+    const n = alongRows ? w : h, lines = alongRows ? h : w, step = alongRows ? 1 : w;
+    const inv = 1 / (2 * r + 1);
+    for (let l = 0; l < lines; l++) {
+      const o = alongRows ? l * w : l, first = src[o], last = src[o + (n - 1) * step];
+      let acc = first * (r + 1);
+      for (let i = 1; i <= r; i++) acc += i < n ? src[o + i * step] : last;
+      for (let i = 0; i < n; i++) {
+        dst[o + i * step] = acc * inv;
+        acc += (i + r + 1 < n ? src[o + (i + r + 1) * step] : last) - (i - r >= 0 ? src[o + (i - r) * step] : first);
+      }
+    }
+  }
+
+  /** Two box passes each way: a soft, rounded falloff whose cost does not grow with r. */
+  function blur(src, w, h, r) {
+    const a = src.slice(), b = new Float32Array(src.length);
+    for (let k = 0; k < 2; k++) { box(a, b, w, h, r, true); box(b, a, w, h, r, false); }
+    return a;
+  }
+
+  /** Read src moved by (dx, dy) texels: a shadow falls on p when the shape sits at p + offset. */
+  function shifted(src, w, h, dx, dy) {
+    const out = new Float32Array(src.length);
+    for (let y = 0; y < h; y++) {
+      const sy = Math.min(h - 1, Math.max(0, y + dy)) * w;
+      for (let x = 0; x < w; x++) out[y * w + x] = src[sy + Math.min(w - 1, Math.max(0, x + dx))];
+    }
+    return out;
+  }
+
+  // height whose ramp sits just inside the shape's edge, so the shape rises from its own outline
+  const inner = (b) => Math.min(1, Math.max(0, 2 * b - 1));
+
+  function encode(height, shade, w, h) {
+    const gx = new Float32Array(w * h), gy = new Float32Array(w * h);
+    let kmax = 1e-6;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      gx[i] = (height[x < w - 1 ? i + 1 : i] - height[x > 0 ? i - 1 : i]) * 0.5;
+      gy[i] = (height[y < h - 1 ? i + w : i] - height[y > 0 ? i - w : i]) * 0.5;
+      kmax = Math.max(kmax, Math.abs(gx[i]), Math.abs(gy[i]));
+    }
+    const data = new Uint8Array(w * h * 4);
+    const byte = (v) => Math.round(Math.min(1, Math.max(0, v)) * 255);
+    for (let i = 0; i < w * h; i++) {
+      data[i * 4] = 128 + Math.round((gx[i] / kmax) * 127);
+      data[i * 4 + 1] = 128 + Math.round((gy[i] / kmax) * 127);
+      data[i * 4 + 2] = byte(height[i]);
+      data[i * 4 + 3] = byte(shade[i]);
+    }
+    // k turns a decoded slope (-1..1) into height per unit of texture coordinate
+    return { data, w, h, k: [kmax * w, kmax * h] };
+  }
+
+  /** Raised rubber frames with the lenses set slightly lower and gently domed. */
+  function eyeRelief(w, h) {
+    const c = U.makeCanvas(w, h);
+    c.getContext('2d', { willReadFrequently: true }); // read back once, so keep it on the CPU
+    paintEyes(c, 0);
+    const R = channel(c, 0), G = channel(c, 1);
+    const s = w / 512;
+    const frame = blur(R, w, h, Math.max(1, Math.round(2 * s)));
+    const lensEdge = blur(G, w, h, Math.max(1, Math.round(1 * s)));
+    const dome = blur(G, w, h, Math.round(26 * s));
+    const halo = shifted(blur(R, w, h, Math.round(4 * s)), w, h, Math.round(3 * s), -Math.round(3 * s));
+    const rim = shifted(blur(G, w, h, Math.round(3 * s)), w, h, Math.round(3 * s), -Math.round(3 * s));
+    const H = new Float32Array(w * h), S = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const li = inner(lensEdge[i]);
+      H[i] = inner(frame[i]) - 0.42 * li + 0.34 * li * dome[i];
+      S[i] = (1 - R[i]) * halo[i] * 1.25 + G[i] * (1 - rim[i]) * 1.1;
+    }
+    return encode(H, S, w, h);
+  }
+
+  /** The chest mark as a raised print with a bevelled edge. */
+  function emblemRelief(w, h) {
+    const c = U.makeCanvas(w, h);
+    c.getContext('2d', { willReadFrequently: true }); // read back once, so keep it on the CPU
+    paintEmblem(c);
+    const M = channel(c, 0);
+    const s = w / 384;
+    const bev = blur(M, w, h, Math.max(1, Math.round(s)));
+    const halo = shifted(blur(M, w, h, Math.round(3 * s)), w, h, Math.round(3 * s), -Math.round(3 * s));
+    const H = new Float32Array(w * h), S = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      H[i] = inner(bev[i]);
+      S[i] = (1 - M[i]) * halo[i] * 1.2;
+    }
+    return encode(H, S, w, h);
+  }
+
+  /** The tear sinks in, the stitches stand up. */
+  function seamRelief(w, h) {
+    const c = U.makeCanvas(w, h);
+    c.getContext('2d', { willReadFrequently: true }); // read back once, so keep it on the CPU
+    paintSeam(c);
+    const R = channel(c, 0), G = channel(c, 1);
+    const tear = blur(R, w, h, 1), thread = blur(G, w, h, 1);
+    const halo = shifted(blur(G, w, h, 2), w, h, 2, -2);
+    const H = new Float32Array(w * h), S = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      H[i] = 0.5 + 0.5 * thread[i] - 0.4 * tear[i] * (1 - G[i]);
+      S[i] = (1 - G[i]) * halo[i] * 0.9;
+    }
+    return encode(H, S, w, h);
+  }
+
+  SMR.heroArt = { eyePath, paintEyes, paintSeam, paintEmblem, eyeRelief, emblemRelief, seamRelief, EYE_RECT, SEAM_RECT };
 })();
