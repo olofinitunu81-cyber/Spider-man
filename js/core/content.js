@@ -8,7 +8,7 @@
 
     suits: [
       { id: 'rebirth', name: 'Rebirth', line: 'Stitched back together on a kitchen table at 3 a.m. It holds.',
-        mask: '#c4122b', body: '#17275f', web: '#09090f', emblem: '#09090f', lens: '#f4f7fc', frame: '#08080e', thread: '#e9dcc6', seam: true,
+        mask: '#c4122b', body: '#17275f', web: '#09090f', emblem: '#f4f7fc', lens: '#f4f7fc', frame: '#08080e', thread: '#e9dcc6', seam: true,
         accent: '#e5162d', accent2: '#2f6bff' },
       { id: 'classic', name: 'Classic', line: 'Red, blue, and no good excuses.',
         mask: '#e3141c', body: '#1f52e0', web: '#0b0b10', emblem: '#0b0b10', lens: '#ffffff', frame: '#0b0b10',
