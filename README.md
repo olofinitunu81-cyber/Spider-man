@@ -87,7 +87,7 @@ turn on Options → Display → Frame rate counter to watch it.
 | Path | What it is |
 |---|---|
 | `js/game/game.js` | Renderer, frame loop, input, camera, HUD, pause and results |
-| `js/game/world.js` | The city: buildings, streets, collisions and where webs can stick |
+| `js/game/world.js` | The city: buildings (with rooms behind the windows), streets, trees, parks, the river and bridge, collisions, where webs can stick |
 | `js/game/life.js` | The city's life: traffic, people who cheer, pigeons, steam, clouds, the news chopper |
 | `js/game/player.js` | Running, jumping, swinging, web-zips and wall-running |
 | `js/game/hero.js` | The playable hero: the full model, skinned and posed in code |

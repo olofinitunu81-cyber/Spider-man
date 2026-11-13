@@ -247,6 +247,7 @@
         p.swingK = U.clamp(-(d.x * tmp.x + d.z * tmp.z) * 1.6, -1, 1);
         if (p.vel.length() > MAX) p.vel.setLength(MAX);
         const c = world.collide(p.pos, p.vel, HW, H);
+        if (c.water) { if (!p.wet) { p.wet = true; p.events.push('splash'); } release(false); return; }
         if (c.ground) { land(p.vel.y); return; }
         if (c.wall && c.top - p.pos.y > 2) { enterWall(c.nx, c.nz, c.top); return; }
         if (p.jumpBuf > 0 && p.boostCool <= 0) { p.jumpBuf = 0; webBoost(input.aim && input.aim.d); return; } // Space mid-swing: let go and zip on
@@ -314,6 +315,7 @@
 
       p.pos.addScaledVector(p.vel, h);
       const c = world.collide(p.pos, p.vel, HW, H);
+      if (c.water) { if (!p.wet) { p.wet = true; p.events.push('splash'); } return; }
       if (p.state === 'ground') {
         if (!c.ground) { toAir(); p.coyote = 0.12; }
         else if (c.wall && hasWish && -(wish.x * c.nx + wish.z * c.nz) > 0.6 && c.top - p.pos.y > 1.2) enterWall(c.nx, c.nz, c.top);
@@ -334,7 +336,7 @@
     function strike(at) { startZip(at, false, 0, 0); p.stats.zips--; }
 
     function reset(pos, facing) {
-      p.pos.copy(pos); p.vel.set(0, 0, 0); p.state = 'ground'; p.facing = facing;
+      p.pos.copy(pos); p.vel.set(0, 0, 0); p.state = 'ground'; p.facing = facing; p.wet = false;
       p.dive = false; p.trickT = 0; p.trick = null; p.combo = 0; p.dodgeT = 0; p.health = 100;
     }
 

@@ -186,6 +186,7 @@
       c.dir = r() < 0.5 ? 1 : -1;
       const across = c.axis === 0 ? near.z : near.x, along = c.axis === 0 ? near.x : near.z;
       c.line = Math.round((across + r.range(-CAR_R, CAR_R) - P / 2) / P) * P + P / 2 + c.dir * 3.3;
+      if (c.axis === 1 && c.line > world.RIVER_X - 60) c.line -= Math.ceil((c.line - (world.RIVER_X - 60)) / P) * P; // no avenues on the river
       c.s = ahead ? along - c.dir * CAR_R * r.range(0.8, 1) : along + r.range(-CAR_R, CAR_R);
       c.speed = r.range(7, 15);
     }
@@ -213,7 +214,7 @@
     const peds = [];
     function placePed(p, near) {
       p.bi = Math.round((near.x + r.range(-PED_R, PED_R)) / P); p.bj = Math.round((near.z + r.range(-PED_R, PED_R)) / P);
-      p.bi = U.clamp(p.bi, -world.SPAN, world.SPAN); p.bj = U.clamp(p.bj, -world.SPAN, world.SPAN);
+      p.bi = U.clamp(p.bi, -world.SPAN, Math.floor((world.RIVER_X - 30) / P)); p.bj = U.clamp(p.bj, -world.SPAN, world.SPAN);
       p.u = r.range(0, 4); p.dir = r() < 0.5 ? 1 : -1; p.speed = r.range(1.1, 1.7); p.off = r.range(0.9, 3); p.cheer = 0; p.flashT = 0;
     }
     for (let i = 0; i < NPED; i++) {
@@ -297,7 +298,7 @@
     // vents: manholes at some street corners and chimneys on some roofs
     const vents = [];
     for (let i = 0; i < 40; i++) {
-      if (r() < 0.55) vents.push({ x: Math.round(r.range(-12, 12)) * P + P / 2 + r.range(-6, 6), y: 0.1, z: Math.round(r.range(-12, 12)) * P + P / 2 + r.range(-6, 6), rate: r.range(0.18, 0.32), t: 0 });
+      if (r() < 0.55) vents.push({ x: Math.round(r.range(-12, 8)) * P + P / 2 + r.range(-6, 6), y: 0.1, z: Math.round(r.range(-12, 12)) * P + P / 2 + r.range(-6, 6), rate: r.range(0.18, 0.32), t: 0 });
       else { const t = world.tops[Math.floor(r() * world.tops.length)]; vents.push({ x: U.lerp(t[0], t[2], r.range(0.2, 0.8)), y: t[4] + 0.5, z: U.lerp(t[1], t[3], r.range(0.2, 0.8)), rate: r.range(0.25, 0.45), t: 0 }); }
     }
 
@@ -339,7 +340,7 @@
         const c = cars[i];
         c.s += c.dir * c.speed * dt;
         const along = c.axis === 0 ? hx : hz;
-        if ((c.s - along) * c.dir > CAR_R || Math.abs(c.s) > lim + 40) placeCar(c, heroHip, true);
+        if ((c.s - along) * c.dir > CAR_R || c.s < -lim - 40 || (c.axis === 0 && c.s > world.RIVER_X - 40) || (c.axis === 1 && Math.abs(c.s) > lim + 40)) placeCar(c, heroHip, true);
         const x = c.axis === 0 ? c.s : c.line, z = c.axis === 0 ? c.line : c.s;
         q.setFromAxisAngle(Y, c.axis === 0 ? (c.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (c.dir > 0 ? 0 : Math.PI));
         m4.compose(v1.set(x, 0, z), q, ONE);

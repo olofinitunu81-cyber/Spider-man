@@ -76,6 +76,31 @@
       web: ['#eef5ff', '#9dc0ff'],
       ink: '#03050c',
     },
+
+    // the game's light: late golden hour over Midtown, a warm sun low over the river
+    golden: {
+      label: 'Golden hour',
+      sky: [
+        [0.0, '#3a5c8f'], [0.22, '#5e7aa6'], [0.4, '#9a9fb4'], [0.52, '#d2aa8a'], [0.62, '#efb878'],
+        [0.7, '#ffcf86'], [0.74, '#ffe2a8'], [0.84, '#f3c48c'], [1.0, '#d6a57c'],
+      ],
+      stars: 0,
+      orb: { kind: 'sun', core: '#fffcee', mid: '#fff1c2', edge: '#ffd685', glow: '#ffb54d', halo: '#ffd9a0' },
+      rays: [255, 214, 150, 0.1],
+      cloud: ['#c98f6c', '#ffe3b6'],
+      far: ['#d8ab84', '#f4c890'],
+      mid: ['#9a7a68', '#c99a74'],
+      near: ['#5a4a46', '#8a6a58'],
+      front: '#2c2422',
+      rim: '#ffc86e',
+      fill: '#86a2cc',
+      haze: '#f2bd84',
+      windows: ['#ffd38a', '#ffcc7a', '#ffe2b0', '#ffc070', '#bcd2ff'],
+      windowLit: 0.16,
+      dust: '#ffe6bc',
+      web: ['#fff6e8', '#ffd08a'],
+      ink: '#1a1412',
+    },
   };
 
   /** Which palette matches the player's own clock. */

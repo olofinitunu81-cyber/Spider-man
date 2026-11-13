@@ -76,13 +76,13 @@
     const camera = new T.PerspectiveCamera(64, 16 / 9, 0.1, 5200);
 
     // shared look: the same palette, haze and grain as the menu
-    const pal = SMR.palettes.dawn;
-    const sunDir = new T.Vector3(0.5, 0.075, -0.86).normalize();
+    const pal = SMR.palettes.golden;
+    const sunDir = new T.Vector3(0.55, 0.12, -0.83).normalize();
     const lut = new T.CanvasTexture(U.makeCanvas(256, 2));
     lut.minFilter = lut.magFilter = T.LinearFilter; lut.generateMipmaps = false;
     const shared = {
       lut, sunDir, timeU: { value: 0 }, grainU: { value: store.get('grain') ? 0.09 : 0 }, mutedU: { value: 0 },
-      fogU: { uHazeLow: { value: vec(pal.far[1]) }, uHazeHigh: { value: vec(pal.far[0]) }, uGlow: { value: vec(pal.orb.mid) }, uSunDir: { value: sunDir }, uFog: { value: 0.0011 } },
+      fogU: { uHazeLow: { value: vec(pal.far[1]) }, uHazeHigh: { value: vec(pal.far[0]) }, uGlow: { value: vec(pal.orb.mid) }, uSunDir: { value: sunDir }, uFog: { value: 0.00085 } },
     };
 
     const world = SMR.createWorld(scene, shared, renderer);
@@ -144,7 +144,7 @@
     linesQuad.frustumCulled = false; fxScene.add(linesQuad);
     renderer.autoClear = false;
     const looseWebs = [{ t: 9, a: new T.Vector3(), b: new T.Vector3(), v: new T.Vector3() }, { t: 9, a: new T.Vector3(), b: new T.Vector3(), v: new T.Vector3() }];
-    let looseN = 0, grooveT = 0;
+    let looseN = 0, grooveT = 0, rollT = 0, stillT = 0;
 
     // the web bomb gadget: a sticky ball that bursts into a net
     const bombMat = new T.ShaderMaterial({
@@ -579,7 +579,17 @@
         for (const e of pl.events) {
           if (e === 'swing' || e === 'zip' || e === 'boost') sound('thwip');
           if (e === 'release') { const w = looseWebs[looseN++ % 2]; w.t = 0; w.a.copy(pl.webEnd); w.b.copy(hero.hand(pl.webRight)); w.v.copy(pl.vel).multiplyScalar(0.5); }
-          if (e === 'land') { sound('land'); life.dust(pl.pos.x, pl.pos.y, pl.pos.z, pl.landT * 3.3); if (pl.landT > 0.15) camState.shake = Math.min(1, pl.landT * 3); }
+          if (e === 'land') {
+            sound('land'); life.dust(pl.pos.x, pl.pos.y, pl.pos.z, pl.landT * 3.3);
+            if (pl.landT > 0.15) camState.shake = Math.min(1, pl.landT * 3);
+            if (Math.hypot(pl.vel.x, pl.vel.z) > 12) rollT = 0.5; // carry the speed through a roll
+          }
+          if (e === 'splash') {
+            for (let k = 0; k < 3; k++) life.dust(pl.pos.x, pl.pos.y + 0.5, pl.pos.z, 1.2);
+            sound('land');
+            say('Spider-Man doesn\'t swim. Back to the promenade.', 2.6);
+            player.reset(new T.Vector3(world.promenade, 0, U.clamp(pl.pos.z, -880, 880)), -Math.PI / 2);
+          }
           if (e === 'trick') sound('trick');
           if (e === 'noAnchor') say('Nothing to swing from up there. Get closer to the buildings.', 2.5, true);
           if (e === 'swing' && !swingHintDone && pl.stats.swings === 2) { swingHintDone = true; say('Let go of ' + key('swing') + ' near the top to fly further. ' + key('jump') + ' mid-swing web-zips you on. ' + key('trick') + ' does tricks.', 5, true); }
@@ -609,7 +619,7 @@
         grooveT = pl.state === 'swing' || (pl.state !== 'ground' && sp > 15) ? 4 : Math.max(0, grooveT - gdt);
         audio.gameMix({ wind: U.clamp((sp - 5) / 38, 0, 1), city: lo.cityLevel, rotor: lo.rotorLevel, groove: grooveT > 0 ? 1 : 0 });
         // the sun climbs while he plays
-        sunDir.set(0.5, 0.075 + 0.13 * Math.min(1, chapter.state.time / 480), -0.86).normalize();
+        sunDir.set(0.55, 0.12 - 0.05 * Math.min(1, chapter.state.time / 600), -0.83).normalize(); // the sun sinks slowly while he plays
         linesMat.uniforms.uAmt.value = store.get('motion') ? U.clamp((sp - 24) / 20, 0, 1) : 0;
       }
 
@@ -625,6 +635,9 @@
       st.webPoint = pl.webEnd; st.webRight = pl.webRight; st.swingK = pl.swingK;
       st.aimPoint = pl.shotT > 0 ? pl.shotAt : null; st.aimRight = pl.shotRight; st.look = lookOff;
       st.dive = pl.dive && pl.state === 'air'; st.punch = pl.punchT; st.punchRight = pl.punchRight;
+      stillT = pl.state === 'ground' && hs < 0.4 && !G.photo ? stillT + dt : 0;
+      st.perch = stillT > 1.4 && pl.pos.y > 6; st.idleT = stillT;
+      rollT = Math.max(0, rollT - (G.photo ? 0 : dt));
       st.hip.copy(hipNow); st.up.set(0, 1, 0); st.fwd.set(Math.sin(pl.facing), 0, Math.cos(pl.facing));
       if (pl.state === 'swing') st.up.copy(pl.anchor).sub(hipNow).normalize().lerp(up, 0.25).normalize();
       else if (pl.state === 'wall') { st.up.copy(pl.wallN); st.fwd.set(0, 1, 0); st.hip.addScaledVector(pl.wallN, 0.75).y -= 0.2; }
@@ -635,6 +648,9 @@
       if (pl.trickT > 0 && pl.trick) {
         const k = 1 - pl.trickT / 0.62, e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
         st.spin = { axis: pl.trick.axis, angle: pl.trick.dir * Math.PI * 2 * e };
+      } else if (rollT > 0 && pl.state === 'ground') {
+        const k = 1 - rollT / 0.5;
+        st.spin = { axis: new T.Vector3(1, 0, 0), angle: Math.PI * 2 * (1 - Math.pow(1 - k, 2.2)) };
       } else if (pl.dodgeT > 0 && pl.state === 'ground') {
         const f = pl.facing, xb = pl.dodgeX * Math.cos(f) - pl.dodgeZ * Math.sin(f), zb = pl.dodgeX * Math.sin(f) + pl.dodgeZ * Math.cos(f);
         const k = 1 - pl.dodgeT / 0.3;
@@ -655,7 +671,7 @@
       });
       webGeo.attributes.position.needsUpdate = true;
 
-      world.update(camera, renderer.domElement.width, renderer.domElement.height, renderer.domElement.height / 1080);
+      world.update(camera, renderer.domElement.width, renderer.domElement.height, renderer.domElement.height / 1080, G.photo ? 0 : dt);
       renderer.clear();
       renderer.render(scene, camera);
       if (linesMat.uniforms.uAmt.value > 0.01 && !G.photo) { linesMat.uniforms.uAsp.value = cssW / cssH; renderer.render(fxScene, fxCam); }

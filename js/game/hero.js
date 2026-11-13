@@ -238,9 +238,9 @@
     }
 
     /* ---------- the poses ---------- */
-    function poseIdle(t) {
-      const br = Math.sin(t * 1.7);
-      tgt.hip.set(0, 0, 0); tgt.spine.set(0.02 * br, 0, 0); tgt.head.set(-0.04, 0, 0); tgt.fist = 0.55;
+    function poseIdle(t, still) {
+      const br = Math.sin(t * 1.7), look = U.smooth(U.clamp((still - 2.5) / 2, 0, 1));
+      tgt.hip.set(0, 0, 0.04 * Math.sin(t * 0.5)); tgt.spine.set(0.02 * br, 0, -0.03 * Math.sin(t * 0.5)); tgt.head.set(-0.04, 0.42 * Math.sin(t * 0.37) * look, 0); tgt.fist = 0.55;
       limb(tgt.armL[0], 0.04, 0.2, 1); limb(tgt.armL[1], 0.32, 0.12, 1);
       limb(tgt.armR[0], 0.04, 0.2, -1); limb(tgt.armR[1], 0.32, 0.12, -1);
       limb(tgt.legL[0], 0.0, 0.07, 1); limb(tgt.legL[1], -0.04, 0.05, 1); tgt.legL[2].set(0.08, -0.3, 1).normalize();
@@ -281,13 +281,27 @@
     }
     function poseSwing(webLocal, useRight, k) { // k: -1 back of the arc … 1 front
       const arm = useRight ? tgt.armR : tgt.armL, other = useRight ? tgt.armL : tgt.armR, s = useRight ? -1 : 1;
-      arm[0].copy(webLocal); arm[1].copy(webLocal);
-      other[0].set(-s * 0.9, -0.1, 0.25).normalize(); other[1].set(-s * 0.7, 0.2, 0.6).normalize();
-      const kick = U.clamp(k, -1, 1);
-      limb(tgt.legL[0], 0.25 + 0.55 * kick, 0.08, 1); limb(tgt.legL[1], -0.35 + 0.3 * kick, 0.05, 1);
-      limb(tgt.legR[0], 0.05 + 0.5 * kick, 0.08, -1); limb(tgt.legR[1], -0.75 + 0.35 * kick, 0.05, -1);
-      tgt.legL[2].set(0, -0.9, 0.4).normalize(); tgt.legR[2].set(0, -0.9, 0.4).normalize();
-      tgt.spine.set(-0.12 + 0.18 * kick, 0, 0.15 * s); tgt.hip.set(0.1 * kick, 0, 0); tgt.head.set(-0.35, 0, 0); tgt.fist = 0.9;
+      arm[0].copy(webLocal); arm[1].copy(webLocal); // the web arm holds the line
+      const kick = U.clamp(k, -1, 1), front = Math.max(0, kick), back = Math.max(0, -kick);
+      // the free arm trails at the back of the arc and sweeps forward and out at the front
+      other[0].set(-s * 0.85, -0.3 + 0.45 * front, 0.1 + 0.5 * kick).normalize();
+      other[1].set(-s * 0.5, 0.1 + 0.45 * front, 0.8).normalize();
+      // legs trail behind, swing through the bottom, then the knees tuck up at the front
+      const th = 0.12 + 0.85 * front - 0.4 * back;
+      limb(tgt.legL[0], th + 0.12, 0.1, 1); limb(tgt.legL[1], th - 0.45 - 0.9 * front, 0.06, 1);
+      limb(tgt.legR[0], th - 0.1, 0.1, -1); limb(tgt.legR[1], th - 0.8 - 0.6 * front, 0.06, -1);
+      tgt.legL[2].set(0, -0.9, 0.35).normalize(); tgt.legR[2].set(0, -0.9, 0.35).normalize();
+      tgt.spine.set(-0.28 * kick - 0.05, 0.12 * s, 0.2 * s); tgt.hip.set(0.18 * kick, 0, 0); tgt.head.set(-0.42 - 0.12 * kick, 0, 0); tgt.fist = 0.9;
+    }
+    /** The classic crouch on a ledge: knees wide, one hand down, weight forward, looking out. */
+    function posePerch(t) {
+      limb(tgt.legL[0], 1.15, 0.62, 1); limb(tgt.legL[1], -0.25, 0.25, 1);
+      limb(tgt.legR[0], 1.15, 0.62, -1); limb(tgt.legR[1], -0.25, 0.25, -1);
+      tgt.legL[2].set(0.35, -0.25, 1).normalize(); tgt.legR[2].set(-0.35, -0.25, 1).normalize();
+      tgt.armL[0].set(0.15, -0.85, 0.5).normalize(); tgt.armL[1].set(0.05, -0.95, 0.3).normalize();
+      tgt.armR[0].set(-0.55, -0.45, 0.7).normalize(); tgt.armR[1].set(0.15, -0.35, 0.95).normalize();
+      tgt.spine.set(0.75, 0.04 * Math.sin(t * 0.6), 0); tgt.hip.set(0.5, 0, 0);
+      tgt.head.set(-0.95 + 0.06 * Math.sin(t * 0.9), 0.5 * Math.sin(t * 0.35), 0); tgt.fist = 0.4;
     }
     function poseZip() {
       tgt.armL[0].set(0.3, 0.55, 0.78).normalize(); tgt.armL[1].set(0.12, 0.45, 0.88).normalize();
@@ -370,7 +384,8 @@
           phase = (phase + (s.speed * dt / stride) * Math.PI) % (Math.PI * 2);
           poseRun(phase, s.sprint, w);
           rate = 16;
-        } else poseIdle(idleT);
+        } else if (s.perch) { posePerch(idleT); rate = 6; }
+        else poseIdle(idleT, s.idleT || 0);
         if (s.landT > 0) poseLand(U.clamp(s.landT / 0.22, 0, 1));
         tgt.hipY = 0;
       } else if (s.state === 'swing') {
@@ -382,6 +397,9 @@
       else if (s.state === 'wall') {
         phase = (phase + (Math.max(s.speed, 2) * dt / 1.2) * Math.PI) % (Math.PI * 2);
         poseRun(phase, 0.3);
+        const ra = 1.15 + 0.6 * Math.sin(phase), rb = 1.15 + 0.6 * Math.sin(phase + Math.PI);
+        limb(tgt.armL[0], ra, 0.35, 1); limb(tgt.armL[1], ra + 0.4, 0.2, 1);
+        limb(tgt.armR[0], rb, 0.35, -1); limb(tgt.armR[1], rb + 0.4, 0.2, -1);
         tgt.hip.x = 0.05; tgt.spine.x = 0.05; tgt.head.x = -0.6;
         rate = 16; orientRate = 12;
       } else if (s.dive) { poseDive(); rate = 10; orientRate = 8; }

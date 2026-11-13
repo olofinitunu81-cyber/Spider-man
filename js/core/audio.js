@@ -179,8 +179,8 @@
     gameMix(m) {
       if (!live || ctx.state !== 'running') return;
       const t = ctx.currentTime, set = (param, v, k) => param.setTargetAtTime(v, t, k || 0.25);
-      set(live.wind.g.gain, 0.32 * m.wind * m.wind); set(live.wind.f.frequency, 380 + 1900 * m.wind, 0.3);
-      set(live.wind2.g.gain, 0.24 * m.wind);
+      set(live.wind.g.gain, 0.06 * m.wind * m.wind); set(live.wind.f.frequency, 380 + 1600 * m.wind, 0.3); // kept low: a hint of rush, not a roar
+      set(live.wind2.g.gain, 0.035 * m.wind);
       set(live.city.g.gain, 0.16 * m.city, 0.8);
       set(live.rotor.g.gain, 0.06 * m.rotor, 0.5); set(live.lfoG.gain, 0.05 * m.rotor, 0.5);
       set(live.groove.gain, 0.85 * m.groove, m.groove > live.lastGroove ? 0.6 : 2.5);
