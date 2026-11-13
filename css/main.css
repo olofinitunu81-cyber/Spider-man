@@ -182,7 +182,7 @@ button:focus { outline: none; }
 .hints span { display: flex; align-items: center; gap: .6rem; opacity: .85; }
 .touch .hints { display: none; }
 .meta { position: absolute; right: var(--edge); bottom: 3.3rem; font-size: .8rem; letter-spacing: .2em; opacity: .5; z-index: 5; text-align: right; }
-.toast { position: absolute; left: 50%; top: 4rem; transform: translate(-50%, -6rem) skewX(-10deg); background: var(--bone); color: var(--ink); font-weight: 900; font-size: 1.05rem; letter-spacing: .14em; padding: .8rem 1.5rem .62rem; z-index: 20; transition: transform .45s var(--pop); pointer-events: none; box-shadow: .35rem .35rem 0 var(--accent); white-space: nowrap; }
+.toast { position: absolute; left: 50%; top: 4rem; transform: translate(-50%, -10rem) skewX(-10deg); background: var(--bone); color: var(--ink); font-weight: 900; font-size: 1.05rem; letter-spacing: .14em; padding: .8rem 1.5rem .62rem; z-index: 20; transition: transform .45s var(--pop); pointer-events: none; box-shadow: .35rem .35rem 0 var(--accent); white-space: nowrap; }
 .toast.show { transform: translate(-50%, 0) skewX(-10deg); }
 .fps { position: absolute; right: 1rem; top: .8rem; font-weight: 900; font-size: .85rem; letter-spacing: .12em; color: var(--gold); z-index: 30; }
 .fade { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 11; transition: opacity .5s ease; }
