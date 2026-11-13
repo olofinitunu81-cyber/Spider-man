@@ -1,0 +1,122 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script></head>
+<body><script type="module">
+// Bakes the posed, cropped bust out of the hero FBX and packs it into one small binary.
+// Driven by convert.js, which serves this page, three.js and the model, and saves the result.
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+const Q = new URLSearchParams(location.search);
+const ARM = +(Q.get('arm') || 34) * Math.PI / 180, CUT = +(Q.get('cut') || -3.9);
+new FBXLoader().load('/model.fbx', (obj) => {
+  let mesh; obj.traverse((o) => { if (o.isSkinnedMesh) mesh = o; });
+  const bone = (n) => { let b; obj.traverse((o) => { if (o.isBone && o.name === n) b = o; }); return b; };
+  const turn = (b, axis, ang) => {
+    obj.updateMatrixWorld(true);
+    const pw = new THREE.Quaternion(); b.parent.getWorldQuaternion(pw);
+    const w = new THREE.Quaternion(); b.getWorldQuaternion(w);
+    b.quaternion.copy(pw.invert().multiply(new THREE.Quaternion().setFromAxisAngle(axis, ang)).multiply(w));
+  };
+  turn(bone('mixamorigLeftArm'), new THREE.Vector3(0, 0, 1), -ARM);
+  turn(bone('mixamorigRightArm'), new THREE.Vector3(0, 0, 1), ARM);
+  obj.updateMatrixWorld(true);
+  mesh.skeleton.update();
+  const G = mesh.geometry, A = G.attributes;
+  const nv = A.position.count, bm = mesh.skeleton.boneMatrices;
+  const pre = new THREE.Matrix4().multiplyMatrices(mesh.matrixWorld, mesh.bindMatrixInverse);
+  const M = new THREE.Matrix4(), T = new THREE.Matrix4(), B = new THREE.Matrix4(), N3 = new THREE.Matrix3();
+  const P = new Float32Array(nv * 3), Nn = new Float32Array(nv * 3);
+  const morphNames = { wide: ['Key 1'] };
+  const morphs = {}; for (const k in morphNames) morphs[k] = new Float32Array(nv * 3);
+  const v = new THREE.Vector3(), n = new THREE.Vector3();
+  const part = new Int8Array(nv).fill(-1);
+  const partOf = { 'Suit.003': 0, 'Mask.003': 1, 'Metal28': 2, 'Right.002': 3, 'Left.002': 3 };
+  for (const g of G.groups) { const p = partOf[mesh.material[g.materialIndex].name]; if (p !== undefined) part.fill(p, g.start, g.start + g.count); }
+  for (let i = 0; i < nv; i++) {
+    if (part[i] < 0) continue;
+    M.elements.fill(0);
+    for (let k = 0; k < 4; k++) {
+      const w = A.skinWeight.getComponent(i, k); if (!w) continue;
+      B.fromArray(bm, A.skinIndex.getComponent(i, k) * 16);
+      for (let e = 0; e < 16; e++) M.elements[e] += B.elements[e] * w;
+    }
+    T.multiplyMatrices(pre, M).multiply(mesh.bindMatrix);
+    v.fromBufferAttribute(A.position, i).applyMatrix4(T); v.toArray(P, i * 3);
+    N3.getNormalMatrix(T);
+    n.fromBufferAttribute(A.normal, i).applyMatrix3(N3).normalize(); n.toArray(Nn, i * 3);
+    for (const k in morphNames) {
+      const d = new THREE.Vector3();
+      for (const name of morphNames[k]) { const t = G.morphAttributes.position[mesh.morphTargetDictionary[name]]; d.add(new THREE.Vector3().fromBufferAttribute(t, i)); }
+      const m3 = new THREE.Matrix3().setFromMatrix4(T); d.applyMatrix3(m3); d.toArray(morphs[k], i * 3);
+    }
+  }
+  // normalise: eyes at y = 0, top of the head at y = 1, centre of the head at z = -0.1
+  let eyeY = 0, eyeN = 0, top = -1e9, zmin = 1e9, zmax = -1e9;
+  for (let i = 0; i < nv; i++) {
+    if (part[i] === 3) { eyeY += P[i * 3 + 1]; eyeN++; }
+    if (part[i] === 1) { top = Math.max(top, P[i * 3 + 1]); }
+  }
+  eyeY /= eyeN;
+  for (let i = 0; i < nv; i++) if (part[i] === 1 && P[i * 3 + 1] > eyeY) { zmin = Math.min(zmin, P[i * 3 + 2]); zmax = Math.max(zmax, P[i * 3 + 2]); }
+  const s = 1 / (top - eyeY), zc = (zmin + zmax) / 2;
+  let chin = 1e9;
+  for (let i = 0; i < nv; i++) {
+    P[i * 3] *= s; P[i * 3 + 1] = (P[i * 3 + 1] - eyeY) * s; P[i * 3 + 2] = (P[i * 3 + 2] - zc) * s - 0.1;
+    for (const k in morphs) { morphs[k][i * 3] *= s; morphs[k][i * 3 + 1] *= s; morphs[k][i * 3 + 2] *= s; }
+    if (part[i] === 1 && Math.abs(P[i * 3]) < 0.05 && P[i * 3 + 2] > 0.3) chin = Math.min(chin, P[i * 3 + 1]);
+  }
+  // the lens and frame on one side were mirrored inside out: flip any side whose normals point inward
+  const inverted = {};
+  for (const pt of [2, 3]) for (const side of [-1, 1]) {
+    let acc = 0;
+    for (let i = 0; i < nv; i++) if (part[i] === pt && Math.sign(P[i * 3]) === side) acc += Nn[i * 3] * P[i * 3] + Nn[i * 3 + 1] * P[i * 3 + 1] + Nn[i * 3 + 2] * (P[i * 3 + 2] + 0.1);
+    inverted[pt + ':' + side] = acc < 0;
+    if (acc < 0) for (let i = 0; i < nv; i++) if (part[i] === pt && Math.sign(P[i * 3]) === side) { Nn[i * 3] *= -1; Nn[i * 3 + 1] *= -1; Nn[i * 3 + 2] *= -1; }
+  }
+  window.INVERTED = inverted;
+  // keep whole triangles above the cut, fix the mirrored half's winding, then weld
+  const map = new Map(), out = [];
+  const verts = [];
+  const key = (i) => [part[i], Math.round(P[i * 3] * 2e4), Math.round(P[i * 3 + 1] * 2e4), Math.round(P[i * 3 + 2] * 2e4), Math.round(Nn[i * 3] * 100), Math.round(Nn[i * 3 + 1] * 100), Math.round(Nn[i * 3 + 2] * 100), Math.round(A.uv.getX(i) * 1e5), Math.round(A.uv.getY(i) * 1e5)].join(',');
+  const idx = (i) => { const k = key(i); let j = map.get(k); if (j === undefined) { j = verts.length; map.set(k, j); verts.push(i); } return j; };
+  let flipped = 0;
+  for (let t = 0; t < nv; t += 3) {
+    if (part[t] < 0 || part[t + 1] < 0 || part[t + 2] < 0) continue;
+    if (Math.min(P[t * 3 + 1], P[t * 3 + 4], P[t * 3 + 7]) < CUT) continue;
+    const a = new THREE.Vector3().fromArray(P, t * 3), b = new THREE.Vector3().fromArray(P, t * 3 + 3), c = new THREE.Vector3().fromArray(P, t * 3 + 6);
+    const fn = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a));
+    const an = new THREE.Vector3().fromArray(Nn, t * 3).add(new THREE.Vector3().fromArray(Nn, t * 3 + 3)).add(new THREE.Vector3().fromArray(Nn, t * 3 + 6));
+    if (fn.dot(an) < 0) { out.push(idx(t), idx(t + 2), idx(t + 1)); flipped++; } else out.push(idx(t), idx(t + 1), idx(t + 2));
+  }
+  const V = verts.length, Tn = out.length / 3;
+  const bb = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9];
+  for (const i of verts) for (let a = 0; a < 3; a++) { bb[a] = Math.min(bb[a], P[i * 3 + a]); bb[a + 3] = Math.max(bb[a + 3], P[i * 3 + a]); }
+  // pack: positions u16x3, normals i8x3 (+pad), uv u16x2, part u8, indices u16x3, morphs (sparse)
+  const chunks = [], meta = { V, T: Tn, bb, morphs: {}, chin: +chin.toFixed(3), flipped, scale: s };
+  const pos = new Uint16Array(V * 3), nor = new Int8Array(V * 4), uv = new Uint16Array(V * 2), prt = new Uint8Array(V + (V & 1));
+  verts.forEach((i, j) => {
+    for (let a = 0; a < 3; a++) pos[j * 3 + a] = Math.round((P[i * 3 + a] - bb[a]) / (bb[a + 3] - bb[a]) * 65535);
+    for (let a = 0; a < 3; a++) nor[j * 4 + a] = Math.round(Nn[i * 3 + a] * 127);
+    let u = A.uv.getX(i), w = A.uv.getY(i);
+    if (part[i] <= 1) w -= 2;
+    if (part[i] === 2) { u = 0; w = 0; }
+    uv[j * 2] = Math.round(Math.min(1, Math.max(0, u)) * 65535); uv[j * 2 + 1] = Math.round(Math.min(1, Math.max(0, w)) * 65535);
+    prt[j] = part[i];
+  });
+  chunks.push(['pos', pos], ['nor', nor], ['uv', uv], ['part', prt], ['index', new Uint16Array(out)]);
+  for (const k in morphs) {
+    const ids = [], ds = []; let mx = 1e-9;
+    verts.forEach((i, j) => { const x = morphs[k][i * 3], y = morphs[k][i * 3 + 1], z = morphs[k][i * 3 + 2]; if (Math.abs(x) + Math.abs(y) + Math.abs(z) > 1e-5) { ids.push(j); ds.push(x, y, z); mx = Math.max(mx, Math.abs(x), Math.abs(y), Math.abs(z)); } });
+    const q = new Int16Array(ds.length); ds.forEach((d, e) => { q[e] = Math.round(d / mx * 32767); });
+    meta.morphs[k] = { count: ids.length, scale: mx };
+    chunks.push([k + '.ids', new Uint16Array(ids)], [k + '.d', q]);
+  }
+  let total = 0; meta.layout = [];
+  for (const [name, arr] of chunks) { meta.layout.push([name, total, arr.length, arr.constructor.name]); total += arr.byteLength; total += (4 - (total % 4)) % 4; }
+  const buf = new Uint8Array(total);
+  meta.layout.forEach(([name, off], c) => buf.set(new Uint8Array(chunks[c][1].buffer, chunks[c][1].byteOffset, chunks[c][1].byteLength), off));
+  let bin = ''; for (let i = 0; i < buf.length; i += 32768) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 32768));
+  window.OUT = { meta, b64: btoa(bin) };
+  window.INFO = { inverted: window.INVERTED, V, T: Tn, bytes: total, chin, flipped, bb: bb.map((x) => +x.toFixed(3)), morphs: meta.morphs, eyeY, top, scale: s };
+  window.DONE = true;
+}, undefined, (e) => { window.INFO = { error: String(e && e.message || e) }; window.DONE = true; });
+</script></body></html>

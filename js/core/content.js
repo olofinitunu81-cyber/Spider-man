@@ -62,7 +62,8 @@
     credits: [
       ['Spider-Man: Rebirth', ['An unofficial fan game']],
       ['Created by', ['Your name here']],
-      ['3D models', ['Hero bust and city built in code', 'Rendered with three.js']],
+      ['Hero 3D model', ['Your name here']],
+      ['City', ['Built in code', 'Rendered with three.js']],
       ['Lettering', ['Spinneret, drawn for this game']],
       ['Sound', ['Synthesised live in the browser']],
       ['Spider-Man created by', ['Stan Lee and Steve Ditko']],

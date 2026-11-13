@@ -1,7 +1,7 @@
 # Spider-Man: Rebirth
 
 An unofficial, non-commercial fan game. This repository currently holds the **main menu**:
-a real-time 3D city at first light, a 3D Spider-Man bust that follows your pointer, and a
+a real-time 3D city at first light, the 3D hero (from the project's own model) following your pointer, and a
 full set of working menu screens. The game itself is the next thing to build.
 
 ## Play it
@@ -44,11 +44,12 @@ python3 -m http.server 8080
 | `js/core/content.js` | All text and data: suits, difficulties, headlines, credits |
 | `js/core/` | Settings and save storage, sound, input (keyboard, pad, touch), helpers |
 | `js/scene/stage.js` | The 3D stage: sky, city, hero, lighting and camera shots |
-| `js/scene/bust.js` | The hero model, sculpted as a distance field and meshed at start-up |
-| `js/scene/heroart.js` | Eyes, seam and chest mark that are wrapped onto the model |
+| `js/scene/heromodel.js` | The hero: a bust baked from the project's 3D model, with its suit masks (generated) |
+| `js/scene/heroart.js` | The stitched seam the Rebirth suit wears over one eye |
 | `js/scene/web.js`, `js/scene/fx.js` | The corner web, fired web lines, dust and the idle spider |
 | `assets/fonts/` | Spinneret, the game's own typeface |
 | `tools/build_font.py` | Draws and builds Spinneret from scratch |
+| `tools/hero/` | Re-bakes the hero from the source FBX and its textures |
 | `vendor/three.min.js` | three.js (MIT), the only dependency |
 
 ### Where the game plugs in
@@ -64,8 +65,23 @@ pip install fonttools shapely brotli
 python3 tools/build_font.py
 ```
 
+### Re-baking the hero
+
+The menu shows a bust baked from the full 3D model (`SpiderManOfficial.fbx` and its
+textures, which are not stored in this repository). The arms are lowered for the portrait,
+the body is cropped at the chest, and the painted textures become masks so every suit can
+recolour the same model. To bake it again after changing the model:
+
+```bash
+cd tools/hero && npm install && npx playwright install chromium && cd ../..
+node tools/hero/convert.js path/to/source/SpiderManOfficial.fbx build/hero
+python3 tools/hero/tex_prep.py path/to/textures build/hero
+python3 tools/hero/pack.py build/hero js/scene/heromodel.js
+```
+
 ## Credits and legal
 
 Spider-Man was created by Stan Lee and Steve Ditko. Spider-Man and all related characters
 are trademarks of Marvel. This project is not affiliated with or endorsed by Marvel or
-Sony. All artwork, models, lettering and sound here were made for this project.
+Sony. The hero's 3D model was supplied for this project; the city, lettering and sound were
+made for it too.

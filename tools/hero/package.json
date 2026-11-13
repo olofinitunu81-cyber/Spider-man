@@ -1,0 +1,9 @@
+{
+  "name": "spider-man-rebirth-hero-tools",
+  "private": true,
+  "description": "Bakes the menu's hero bust from the source 3D model",
+  "devDependencies": {
+    "three": "0.170.0",
+    "playwright": "^1.48.0"
+  }
+}
