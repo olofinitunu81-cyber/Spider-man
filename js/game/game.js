@@ -87,6 +87,7 @@
 
     const world = SMR.createWorld(scene, shared, renderer);
     world.applyPalette(pal, vec);
+    const life = SMR.createLife(scene, world, shared, pal);
     const aniso = soft ? 1 : Math.min(4, renderer.capabilities.getMaxAnisotropy());
     const hero = await SMR.createHero(shared, aniso);
     hero.setSuit(opts.suit, vec);
@@ -98,7 +99,7 @@
     let chapter = null;
 
     // web lines: camera-facing ribbons from his hand to whatever the web is stuck to
-    const WEBS = 4;
+    const WEBS = 6;
     const webPos = new Float32Array(WEBS * 4 * 3), webIdx = [];
     for (let i = 0; i < WEBS; i++) webIdx.push(i * 4, i * 4 + 1, i * 4 + 2, i * 4 + 2, i * 4 + 1, i * 4 + 3);
     const webGeo = new T.BufferGeometry();
@@ -122,6 +123,28 @@
       webPos[o + 9] = b.x + wside.x; webPos[o + 10] = b.y + wside.y; webPos[o + 11] = b.z + wside.z;
     }
     function clearWeb(i) { webPos.fill(0, i * 12, i * 12 + 12); }
+
+    // speed lines at high speed: a full-screen pass over the scene
+    const fxScene = new T.Scene(), fxCam = new T.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const linesMat = new T.ShaderMaterial({
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: `precision highp float; uniform float uAmt, uTime, uAsp; varying vec2 vUv;
+        void main() {
+          vec2 p = vUv * 2.0 - 1.0; p.x *= uAsp;
+          float r = length(p), a = atan(p.y, p.x) / 6.2831853 * 56.0;
+          float lane = floor(a), h = fract(sin(lane * 91.7 + 3.1) * 43758.5);
+          float w = 1.0 - smoothstep(0.08, 0.32, abs(fract(a) - 0.5));
+          float run = fract(h * 13.0 - r * 0.9 + uTime * (1.6 + h * 2.4));
+          float streak = step(0.62, h) * smoothstep(0.45, 1.25, r) * smoothstep(0.0, 0.25, run) * (1.0 - smoothstep(0.35, 0.7, run));
+          gl_FragColor = vec4(vec3(1.0, 0.97, 0.92), streak * w * uAmt * 0.32);
+        }`,
+      uniforms: { uAmt: { value: 0 }, uTime: shared.timeU, uAsp: { value: 1.78 } }, transparent: true, depthTest: false, depthWrite: false,
+    });
+    const linesQuad = new T.Mesh(new T.PlaneGeometry(2, 2), linesMat);
+    linesQuad.frustumCulled = false; fxScene.add(linesQuad);
+    renderer.autoClear = false;
+    const looseWebs = [{ t: 9, a: new T.Vector3(), b: new T.Vector3(), v: new T.Vector3() }, { t: 9, a: new T.Vector3(), b: new T.Vector3(), v: new T.Vector3() }];
+    let looseN = 0, grooveT = 0;
 
     // the web bomb gadget: a sticky ball that bursts into a net
     const bombMat = new T.ShaderMaterial({
@@ -449,6 +472,7 @@
     function caught(how) {
       if (!chapter.catchActive()) return false;
       pop(how + '!');
+      sound('catch');
       player.gainFocus(22);
       camState.shake = 0.35;
       if (store.get('vibration')) SMR.input.rumble(140, 0.6);
@@ -460,11 +484,11 @@
       player.hipPoint(hipNow);
       const dist = d ? d.pos.distanceTo(hipNow) : Infinity;
       if (input.meleePressed) {
-        player.punch(); sound('back');
+        player.punch(); sound('punch');
         if (d && dist < 4.5) caught('Punch');
       }
       if (input.strikePressed) {
-        if (d && dist < 32 && inCone(d.pos, 0.55)) { player.shoot(d.pos); player.strike(d.pos.clone()); striking = d; sound('web'); }
+        if (d && dist < 32 && inCone(d.pos, 0.55)) { player.shoot(d.pos); player.strike(d.pos.clone()); striking = d; sound('thwip'); }
         else if (chapter.state.stage === 'drones') say('No drone in range. Get within about 30 m, with it near the middle of the screen.', 2.6, true);
       }
       if (striking) {
@@ -475,7 +499,7 @@
         }
       }
       if (input.yankPressed) {
-        if (d && dist < (G.aiming ? 42 : 30) && inCone(d.pos, G.aiming ? 0.42 : 0.3)) { player.shoot(d.pos); sound('web'); caught('Yanked'); }
+        if (d && dist < (G.aiming ? 42 : 30) && inCone(d.pos, G.aiming ? 0.42 : 0.3)) { player.shoot(d.pos); sound('thwip'); caught('Yanked'); }
         else if (chapter.state.stage === 'drones') say('Aim with ' + key('aim') + ', then ' + key('yank') + ' to yank a drone in.', 2.6, true);
       }
       if (input.finisherPressed) {
@@ -553,13 +577,15 @@
         aim.o.copy(camera.position); camera.getWorldDirection(aim.d);
         if (!G.done) player.update(gdt, input, look.yaw);
         for (const e of pl.events) {
-          if (e === 'swing' || e === 'zip' || e === 'boost') sound('web');
-          if (e === 'land' && pl.landT > 0.15) camState.shake = Math.min(1, pl.landT * 3);
+          if (e === 'swing' || e === 'zip' || e === 'boost') sound('thwip');
+          if (e === 'release') { const w = looseWebs[looseN++ % 2]; w.t = 0; w.a.copy(pl.webEnd); w.b.copy(hero.hand(pl.webRight)); w.v.copy(pl.vel).multiplyScalar(0.5); }
+          if (e === 'land') { sound('land'); life.dust(pl.pos.x, pl.pos.y, pl.pos.z, pl.landT * 3.3); if (pl.landT > 0.15) camState.shake = Math.min(1, pl.landT * 3); }
+          if (e === 'trick') sound('trick');
           if (e === 'noAnchor') say('Nothing to swing from up there. Get closer to the buildings.', 2.5, true);
           if (e === 'swing' && !swingHintDone && pl.stats.swings === 2) { swingHintDone = true; say('Let go of ' + key('swing') + ' near the top to fly further. ' + key('jump') + ' mid-swing web-zips you on. ' + key('trick') + ' does tricks.', 5, true); }
           if (e === 'trick') pop(pl.trick.name + (pl.combo > 1 ? ' ×' + pl.combo : ''));
           if (e === 'sloppy') pop('Sloppy landing');
-          if (e === 'dodge') sound('back');
+          if (e === 'dodge') sound('trick');
           if (e === 'perch') pop('Perch');
           if (e === 'hurt') { camState.shake = 1; say('Ow. That one hurt.', 2); }
           if (e === 'down') {
@@ -574,6 +600,17 @@
         if (!G) return;
         if (!G.done || G.free) chapter.update(gdt, player);
         updateGadget(gdt);
+        player.hipPoint(hipNow);
+        const sp = pl.vel.length();
+        life.heli.aimAt = chapter.state.stage === 'bugle' || G.done ? world.bugleTop : null;
+        const lo = life.update(gdt, shared.timeU.value, hipNow, pl.state, sp);
+        for (const snd of lo.sounds) sound(snd);
+        if (lo.shout && !G.done) say(lo.shout, 2.4);
+        grooveT = pl.state === 'swing' || (pl.state !== 'ground' && sp > 15) ? 4 : Math.max(0, grooveT - gdt);
+        audio.gameMix({ wind: U.clamp((sp - 5) / 38, 0, 1), city: lo.cityLevel, rotor: lo.rotorLevel, groove: grooveT > 0 ? 1 : 0 });
+        // the sun climbs while he plays
+        sunDir.set(0.5, 0.075 + 0.13 * Math.min(1, chapter.state.time / 480), -0.86).normalize();
+        linesMat.uniforms.uAmt.value = store.get('motion') ? U.clamp((sp - 24) / 20, 0, 1) : 0;
       }
 
       // pose the hero
@@ -611,10 +648,17 @@
       if (pl.state === 'swing' || pl.state === 'boost') setWeb(0, wa.copy(hero.hand(pl.webRight)), pl.webEnd, 0.035); else clearWeb(0);
       if (pl.state === 'zip' && !striking) { setWeb(1, wa.copy(hero.hand(true)), pl.zipTo, 0.03); setWeb(2, wb.copy(hero.hand(false)), pl.zipTo, 0.03); } else { clearWeb(1); clearWeb(2); }
       if (pl.shotT > 0) setWeb(3, wa.copy(hero.hand(pl.shotRight)), striking ? striking.pos : pl.shotAt, 0.04); else clearWeb(3);
+      looseWebs.forEach((w, k) => {
+        if (w.t > 1.1) { clearWeb(4 + k); return; }
+        w.t += G.photo ? 0 : dt; w.v.y -= 20 * dt; w.b.addScaledVector(w.v, dt);
+        setWeb(4 + k, w.a, w.b, 0.03 * (1 - w.t / 1.1));
+      });
       webGeo.attributes.position.needsUpdate = true;
 
       world.update(camera, renderer.domElement.width, renderer.domElement.height, renderer.domElement.height / 1080);
+      renderer.clear();
       renderer.render(scene, camera);
+      if (linesMat.uniforms.uAmt.value > 0.01 && !G.photo) { linesMat.uniforms.uAsp.value = cssW / cssH; renderer.render(fxScene, fxCam); }
       adapt(gap, dt);
 
       // HUD
@@ -676,6 +720,8 @@
         if (document.pointerLockElement === canvas) document.exitPointerLock();
         if (navigator.keyboard && navigator.keyboard.unlock) navigator.keyboard.unlock();
         if (chapter) chapter.dispose();
+        audio.gameStop();
+        life.dispose(); linesQuad.geometry.dispose(); linesMat.dispose();
         world.dispose(); hero.dispose(); webGeo.dispose(); webMat.dispose(); lut.dispose(); bomb.geometry.dispose(); bombMat.dispose();
         renderer.dispose(); renderer.forceContextLoss();
         root.remove();
@@ -685,6 +731,7 @@
     window.addEventListener('resize', resize);
     newChapter();
     resize();
+    audio.gameStart();
     requestAnimationFrame((t) => { last = t; root.classList.add('on'); showCard(); frame(t); });
     return G;
   }

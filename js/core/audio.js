@@ -4,6 +4,7 @@
   'use strict';
   const SMR = window.SMR;
   let ctx = null, master = null, musicBus = null, sfxBus = null, noiseBuf = null, musicTimer = null, started = false;
+  // (the game's soundscape uses these too; see gameStart)
   const vol = { master: 0.8, music: 0.6, sfx: 0.8 };
 
   function ensure() {
@@ -67,6 +68,16 @@
     deny() { tone('square', 140, 110, 0.09, 0.07); tone('square', 120, 96, 0.11, 0.07, 0.1); },
     equip() { whoosh(500, 6000, 0.22, 0.3, 5); tone('sine', 784, 784, 0.1, 0.11, 0.16); tone('sine', 1175, 1175, 0.16, 0.11, 0.24); },
     web() { whoosh(1200, 5200, 0.1, 0.4, 3); tone('sine', 430, 300, 0.2, 0.1, 0.09); },
+    // in the game
+    thwip() { whoosh(5200, 1800, 0.09, 0.32, 4); whoosh(900, 300, 0.16, 0.12, 1.5, 0.03); },
+    land() { tone('sine', 120, 42, 0.22, 0.4); whoosh(700, 160, 0.2, 0.22, 0.8); },
+    punch() { tone('sine', 160, 55, 0.12, 0.45); whoosh(2400, 600, 0.08, 0.25, 1.2); },
+    trick() { whoosh(400, 2600, 0.32, 0.22, 1.4); },
+    horn() { const f = 330 + Math.random() * 90; tone('square', f, f, 0.32, 0.035); tone('square', f * 1.26, f * 1.26, 0.32, 0.03); },
+    flutter() { for (let i = 0; i < 9; i++) whoosh(1800 + Math.random() * 1500, 900, 0.06, 0.07, 2.5, i * 0.045 + Math.random() * 0.02); },
+    shutter() { whoosh(6000, 4000, 0.03, 0.08, 6); whoosh(5000, 3500, 0.03, 0.06, 6, 0.06); },
+    siren() { const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; for (let k = 0; k < 6; k++) { o.frequency.setValueAtTime(680, t + k * 0.9); o.frequency.linearRampToValueAtTime(980, t + k * 0.9 + 0.45); o.frequency.linearRampToValueAtTime(680, t + k * 0.9 + 0.9); } g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.018, t + 0.8); g.gain.linearRampToValueAtTime(0.0001, t + 5.4); o.connect(g); g.connect(sfxBus); o.start(t); o.stop(t + 5.5); },
+    catch() { whoosh(600, 7000, 0.3, 0.35, 3); tone('sine', 523, 523, 0.12, 0.1, 0.12); tone('sine', 784, 784, 0.18, 0.1, 0.2); tone('sine', 1047, 1047, 0.3, 0.09, 0.28); },
     start() { whoosh(260, 6400, 1.0, 0.5, 1.2); tone('sine', 110, 34, 0.9, 0.6, 0.85); whoosh(3000, 300, 0.8, 0.3, 0.8, 0.85); },
   };
 
@@ -103,7 +114,87 @@
     chord++;
   }
 
+  /* ---- the game's living soundscape: wind with speed, the city's hum, a news chopper,
+     and a light groove that comes in while he is swinging ---- */
+  let live = null;
+  function loopNoise(type, freq, q) {
+    const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+    src.buffer = noiseBuf; src.loop = true;
+    f.type = type; f.frequency.value = freq; f.Q.value = q || 0.7;
+    g.gain.value = 0;
+    src.connect(f); f.connect(g); g.connect(sfxBus);
+    src.start(0, Math.random());
+    return { src, f, g };
+  }
+  const BPM = 104, STEP = 60 / BPM / 4;
+  function scheduleGroove() {
+    if (!live) return;
+    while (live.next < ctx.currentTime + 0.25) {
+      const t = live.next, i = live.step % 16, bar = Math.floor(live.step / 16);
+      const ch = CHORDS[Math.floor(bar / 2) % CHORDS.length];
+      if (i % 4 === 0) { // kick
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.frequency.setValueAtTime(130, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.14);
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+        o.connect(g); g.connect(live.groove); o.start(t); o.stop(t + 0.26);
+      }
+      if (i % 8 === 4) { // snare
+        const s2 = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+        s2.buffer = noiseBuf; f.type = 'bandpass'; f.frequency.value = 1800; f.Q.value = 0.8;
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.22, t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+        s2.connect(f); f.connect(g); g.connect(live.groove); s2.start(t, Math.random()); s2.stop(t + 0.18);
+      }
+      if (i % 2 === 0) { // hats
+        const s2 = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+        s2.buffer = noiseBuf; f.type = 'highpass'; f.frequency.value = 7000;
+        const a = i % 4 === 2 ? 0.07 : 0.035;
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(a, t + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+        s2.connect(f); f.connect(g); g.connect(live.groove); s2.start(t, Math.random()); s2.stop(t + 0.06);
+      }
+      if ([0, 3, 6, 10, 12].includes(i)) { // bass on the chord's root
+        const f0 = ch[0] / 2 * (i === 10 ? 1.5 : 1), o = ctx.createOscillator(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
+        o.type = 'sawtooth'; o.frequency.value = f0; lp.type = 'lowpass'; lp.frequency.value = 420;
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.14, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + STEP * 2.2);
+        o.connect(lp); lp.connect(g); g.connect(live.groove); o.start(t); o.stop(t + STEP * 2.4);
+      }
+      live.next += STEP; live.step++;
+    }
+  }
+
   SMR.audio = {
+    /** Start the game's loops (call after unlock). */
+    gameStart() {
+      if (!ensure() || live) return;
+      live = {
+        wind: loopNoise('bandpass', 700, 0.6), wind2: loopNoise('lowpass', 260, 0.5), city: loopNoise('lowpass', 180, 0.4),
+        rotor: loopNoise('lowpass', 140, 1.2), groove: ctx.createGain(), next: ctx.currentTime + 0.1, step: 0,
+      };
+      // the chopper's blades: the rotor noise pulses about 11 times a second
+      live.lfo = ctx.createOscillator(); live.lfoG = ctx.createGain(); live.lfo.frequency.value = 11; live.lfoG.gain.value = 0;
+      live.lfo.connect(live.lfoG); live.lfoG.connect(live.rotor.g.gain); live.lfo.start();
+      live.groove.gain.value = 0; live.groove.connect(musicBus);
+      live.timer = setInterval(scheduleGroove, 60);
+    },
+    /** Levels 0..1, eased: wind (speed), city (hum at street level), rotor (chopper nearby), groove (swinging). */
+    gameMix(m) {
+      if (!live || ctx.state !== 'running') return;
+      const t = ctx.currentTime, set = (param, v, k) => param.setTargetAtTime(v, t, k || 0.25);
+      set(live.wind.g.gain, 0.32 * m.wind * m.wind); set(live.wind.f.frequency, 380 + 1900 * m.wind, 0.3);
+      set(live.wind2.g.gain, 0.24 * m.wind);
+      set(live.city.g.gain, 0.16 * m.city, 0.8);
+      set(live.rotor.g.gain, 0.06 * m.rotor, 0.5); set(live.lfoG.gain, 0.05 * m.rotor, 0.5);
+      set(live.groove.gain, 0.85 * m.groove, m.groove > live.lastGroove ? 0.6 : 2.5);
+      live.lastGroove = m.groove;
+    },
+    gameStop() {
+      if (!live) return;
+      clearInterval(live.timer);
+      const t = ctx.currentTime;
+      for (const k of ['wind', 'wind2', 'city', 'rotor']) { live[k].g.gain.setTargetAtTime(0, t, 0.1); live[k].src.stop(t + 0.5); }
+      live.lfo.stop(t + 0.5);
+      live.groove.gain.setTargetAtTime(0, t, 0.2);
+      live = null;
+    },
     /** Must be called from a key press or click: browsers block sound until then. */
     unlock() {
       if (!ensure()) return;
