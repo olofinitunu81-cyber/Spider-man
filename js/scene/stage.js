@@ -948,4 +948,6 @@
   }
 
   SMR.createStage = createStage;
+  // the game draws the same sky and buildings, so it borrows these
+  SMR.shaders = { GRAIN_GLSL, FOG_GLSL, SKY_VS, SKY_FS, CITY_VS, CITY_FS };
 })();

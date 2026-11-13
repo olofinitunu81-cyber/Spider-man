@@ -50,12 +50,13 @@
 
     controls: [
       ['Move', 'W A S D', 'Left stick'],
+      ['Look', 'Mouse', 'Right stick'],
       ['Jump', 'Space', 'A'],
-      ['Web swing', 'Shift', 'RT'],
-      ['Web zip', 'E', 'RB'],
-      ['Web shot', 'Left mouse', 'X'],
-      ['Punch', 'F', 'Y'],
-      ['Dodge', 'Ctrl', 'B'],
+      ['Web swing (hold in the air)', 'Space', 'A or RT'],
+      ['Sprint', 'Shift', 'LT or L3'],
+      ['Web-zip', 'E or right mouse', 'X or RB'],
+      ['Web a drone', 'F or left mouse', 'Y or LB'],
+      ['Run up walls', 'Run into them', 'Run into them'],
       ['Pause', 'Esc', 'Start'],
     ],
 

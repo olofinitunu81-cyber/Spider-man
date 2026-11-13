@@ -207,3 +207,54 @@ button:focus { outline: none; }
   .dialog { width: calc(100vw - 4rem); }
   .tabs { flex-wrap: wrap; max-width: calc(100vw - 5rem); } .rows { top: 27rem; } .keys { top: 27.4rem; }
 }
+
+/* ---------- the game (chapter one) ---------- */
+.game { position: absolute; inset: 0; z-index: 14; opacity: 0; transition: opacity .6s ease; background: var(--ink); cursor: crosshair; }
+.game.on { opacity: 1; }
+.game-gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#app[data-screen="play"] .fps, #app[data-screen="play"] .hints { display: none; }
+.hud { position: absolute; inset: 0; pointer-events: none; font-weight: 900; letter-spacing: .12em; color: var(--bone); text-shadow: 0 .12rem .5rem rgba(5, 6, 15, .55); }
+.hud-obj { position: absolute; left: var(--edge); top: 3rem; padding: .9rem 1.4rem 1rem 1.2rem; border-left: .45rem solid var(--accent); background: linear-gradient(90deg, rgba(5, 6, 15, .72), rgba(5, 6, 15, 0)); min-width: 26rem; }
+.hud-obj.bump { animation: rise .6s var(--ease); }
+.hud-chapter { font-size: .8rem; letter-spacing: .24em; color: var(--gold); text-transform: uppercase; }
+.hud-goal { font-size: 1.85rem; margin-top: .25rem; letter-spacing: .06em; }
+.hud-detail { font-size: 1rem; font-weight: 400; margin-top: .3rem; opacity: .9; display: flex; gap: 1rem; align-items: baseline; }
+.hud-detail b { font-weight: 900; color: var(--gold); }
+.hud-marker { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+.hud-marker i { position: absolute; left: -.8rem; top: -.8rem; width: 1.6rem; height: 1.6rem; border: .22rem solid var(--gold); background: rgba(255, 210, 122, .18); transform: rotate(45deg); box-shadow: 0 0 1rem rgba(255, 170, 70, .6); animation: mark 1.4s ease-in-out infinite; }
+.hud-marker span { position: absolute; left: -4rem; width: 8rem; top: 1.3rem; text-align: center; font-size: .9rem; color: var(--gold); }
+.hud-marker.edge i { border-radius: 0 50% 50% 50%; transform: rotate(calc(var(--ang) + 45deg)); }
+@keyframes mark { 50% { box-shadow: 0 0 1.8rem rgba(255, 170, 70, .95); } }
+.hud-aim { position: absolute; left: 50%; top: 50%; width: .5rem; height: .5rem; margin: -.25rem 0 0 -.25rem; border-radius: 50%; background: rgba(244, 239, 230, .75); box-shadow: 0 0 0 .14rem rgba(5, 6, 15, .4); transition: transform .15s var(--pop), background .15s; }
+.hud-aim.lock { transform: scale(3.2); background: transparent; box-shadow: 0 0 0 .08rem var(--accent), 0 0 .8rem var(--accent); }
+.hud-speed { position: absolute; right: var(--edge); bottom: 3rem; text-align: right; opacity: 0; transition: opacity .4s ease; }
+.hud-speed.on { opacity: 1; }
+.hud-speed b { display: block; font-size: 3.4rem; line-height: 1; letter-spacing: .02em; font-style: italic; }
+.hud-speed span { font-size: .85rem; letter-spacing: .3em; color: var(--gold); }
+.hud-say { position: absolute; left: 50%; bottom: 7.6rem; transform: translate(-50%, 1rem); max-width: 60rem; text-align: center; font-weight: 400; font-size: 1.35rem; letter-spacing: .04em; opacity: 0; transition: opacity .35s ease, transform .35s var(--ease); }
+.hud-say.on { opacity: 1; transform: translate(-50%, 0); }
+.hud-tip { position: absolute; left: 50%; top: 9rem; transform: translate(-50%, -1rem) skewX(-8deg); background: var(--bone); color: var(--ink); text-shadow: none; padding: .7rem 1.4rem .55rem; font-size: 1.05rem; letter-spacing: .1em; box-shadow: .35rem .35rem 0 var(--accent); opacity: 0; transition: opacity .3s ease, transform .4s var(--pop); white-space: nowrap; }
+.hud-tip.on { opacity: 1; transform: translate(-50%, 0) skewX(-8deg); }
+.hud-keys { position: absolute; left: var(--edge); bottom: 3rem; font-size: .9rem; font-weight: 400; letter-spacing: .16em; opacity: .75; white-space: pre; }
+.hud-keys.dim::after { content: '   ·   Click to steer with the mouse'; color: var(--gold); }
+.hud-fps { position: absolute; right: 1rem; top: .8rem; font-size: .85rem; color: var(--gold); }
+.game-card { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); text-align: center; opacity: 0; pointer-events: none; }
+.game-card.on { animation: card 4.2s var(--ease) forwards; }
+.game-card .kicker { font-size: 1rem; letter-spacing: .4em; color: var(--gold); text-transform: uppercase; }
+.game-card .big { font-weight: 900; font-size: 6.5rem; line-height: 1; margin: .4rem 0 .8rem; letter-spacing: .04em; text-shadow: .4rem .4rem 0 var(--accent); }
+.game-card p { font-size: 1.25rem; letter-spacing: .06em; line-height: 1.6; }
+@keyframes card { 0% { opacity: 0; transform: translate(-50%, -40%); } 14%, 72% { opacity: 1; transform: translate(-50%, -50%); } 100% { opacity: 0; transform: translate(-50%, -56%); } }
+.game-over { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(5, 6, 15, .62); opacity: 0; visibility: hidden; transition: opacity .3s ease, visibility 0s .3s; cursor: default; }
+.game.paused .game-pause, .game.finished .game-done { opacity: 1; visibility: visible; transition: opacity .3s ease; }
+.game-over .panel { position: relative; padding: 2.4rem 3.2rem 2.6rem; min-width: 28rem; }
+.game-over .panel::before { content: ""; position: absolute; inset: 0; background: var(--ink); border-left: .5rem solid var(--accent); transform: skewX(-6deg); z-index: -1; box-shadow: .6rem .6rem 0 var(--accent2); }
+.game-over .kicker { font-size: .85rem; letter-spacing: .3em; color: var(--gold); text-transform: uppercase; }
+.game-over h2 { font-size: 3.4rem; margin: .3rem 0 1.4rem; letter-spacing: .04em; }
+.game-over .done-line { margin: -1rem 0 1.2rem; font-size: 1.2rem; letter-spacing: .3em; text-transform: uppercase; color: var(--accent); font-weight: 900; }
+.game-over nav { display: flex; flex-direction: column; gap: .5rem; align-items: flex-start; }
+.gbtn { font: inherit; font-weight: 900; font-size: 1.45rem; letter-spacing: .08em; color: var(--bone); background: none; border: 0; padding: .45rem 1rem .35rem; cursor: pointer; position: relative; }
+.gbtn.on { color: #fff; }
+.gbtn.on::before { content: ""; position: absolute; inset: 0; background: var(--accent); transform: skewX(-12deg); z-index: -1; box-shadow: .3rem .3rem 0 var(--accent2); }
+.stats { display: grid; grid-template-columns: auto auto; gap: .55rem 2.4rem; margin: 0 0 1.8rem; font-size: 1.15rem; letter-spacing: .1em; }
+.stats dt { opacity: .7; font-weight: 400; }
+.stats dd { margin: 0; font-weight: 900; text-align: right; }

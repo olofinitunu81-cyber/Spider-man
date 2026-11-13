@@ -416,26 +416,34 @@
       let spiral = 'M50 50';
       for (let i = 1; i <= 140; i++) { const a = i * 0.32, r = 2 + i * 0.3; spiral += 'L' + (50 + Math.cos(a) * r).toFixed(1) + ' ' + (50 + Math.sin(a) * r).toFixed(1); }
       el.innerHTML = '<div class="play-load"><svg class="loader" viewBox="0 0 100 100"><path pathLength="1" d="' + spiral + '"/></svg><p class="play-tip"></p></div>' +
-        '<div class="play-card"><div class="kicker"></div><div class="big">Chapter one</div>' +
-        '<p class="note">This is where the game takes over. The menu is finished; the first chapter is the next thing to build.</p><nav class="menu"></nav></div>';
+        '<div class="play-card"><div class="kicker"></div><div class="big">Chapter one</div><p class="note"></p><nav class="menu"></nav></div>';
       el.querySelector('.menu').appendChild(item('Back to menu', { run: back }));
     },
     enter(p) {
-      const el = this.el;
+      const el = this.el, save = p.save;
       el.classList.remove('arrived');
       el.querySelector('.play-tip').textContent = C.tips[Math.floor(Math.random() * C.tips.length)];
-      el.querySelector('.kicker').textContent = diffById(p.save.difficulty).name + ' · ' + suitById(store.get('suit')).name + ' suit';
-      clearTimeout(this.timer);
-      this.timer = setTimeout(() => {
+      stage.hold(true); // the game draws the city itself
+      this.failed = false;
+      SMR.game.start({
+        suit: suitById(store.get('suit')), difficulty: save.difficulty,
+        onQuit: () => back(),
+        onComplete: (st) => {
+          const sv = store.getSave() || save;
+          sv.chapter = 1; sv.done = Math.max(sv.done || 0, 1); sv.best = sv.best ? Math.min(sv.best, st.time) : st.time; sv.updated = Date.now();
+          store.setSave(sv);
+        },
+      }).catch((err) => {
+        console.error(err);
+        this.failed = true;
+        el.querySelector('.kicker').textContent = 'Chapter one';
+        el.querySelector('.note').textContent = 'The game could not start on this browser (it needs WebGL 2). Try a current Chrome, Edge, Firefox or Safari.';
         el.classList.add('arrived');
-        stage.hold(true); // the city is fully covered here, so stop drawing it
         setFocus(items(el)[0], true);
-        this.hints = [['ok', 'Back to menu']];
-        renderHints();
-      }, 2100);
+      });
     },
-    leave() { clearTimeout(this.timer); this.hints = []; stage.hold(false); stage.setShot('main', true); },
-    handle(action) { if (!this.el.classList.contains('arrived')) return true; if (action === 'back') { back(); return true; } return false; },
+    leave() { SMR.game.stop(); stage.hold(false); stage.setShot('main', true); },
+    handle(action) { if (this.failed) { if (action === 'back') { back(); return true; } return false; } return true; }, // the game reads its own input
   });
 
   /* ---------- pointer ---------- */
