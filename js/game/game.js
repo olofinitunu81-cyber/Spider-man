@@ -144,7 +144,7 @@
     linesQuad.frustumCulled = false; fxScene.add(linesQuad);
     renderer.autoClear = false;
     const looseWebs = [{ t: 9, a: new T.Vector3(), b: new T.Vector3(), v: new T.Vector3() }, { t: 9, a: new T.Vector3(), b: new T.Vector3(), v: new T.Vector3() }];
-    let looseN = 0, grooveT = 0, rollT = 0, stillT = 0;
+    let looseN = 0, grooveT = 0, stillT = 0, cheer = false;
 
     // the web bomb gadget: a sticky ball that bursts into a net
     const bombMat = new T.ShaderMaterial({
@@ -311,7 +311,7 @@
       const cp = Math.cos(look.pitch);
       lookDir.set(Math.sin(look.yaw) * cp, -Math.sin(look.pitch), Math.cos(look.yaw) * cp);
       camRight.set(-Math.cos(look.yaw), 0, Math.sin(look.yaw));
-      camT.copy(hipNow).add(wtmp.set(0, 0.55, 0));
+      camT.copy(hipNow).add(wtmp.set(0, pl.state === 'ceiling' ? -0.7 : 0.55, 0));
       camP.copy(camT).addScaledVector(lookDir, -camState.dist).addScaledVector(camRight, shoulder);
       // keep a wall from coming between the camera and him
       const dir = wtmp.copy(camP).sub(camT), dl = dir.length();
@@ -391,6 +391,7 @@
 
     function complete() {
       G.done = true;
+      cheer = true; // he strikes a pose as soon as he is on his feet
       const st = chapter.state, ps = player.p.stats;
       const t = st.time, mm = Math.floor(t / 60), ss = Math.floor(t % 60);
       $('.stats').innerHTML = [['Time', mm + ':' + String(ss).padStart(2, '0')], ['Top speed', Math.round(ps.top * 3.6) + ' km/h'], ['Swings', ps.swings], ['Web-zips', ps.zips], ['Air tricks', ps.tricks], ['Drones caught', '3 / 3']]
@@ -459,7 +460,7 @@
     function showCard() {
       hud.card.classList.remove('on'); void hud.card.offsetWidth; hud.card.classList.add('on');
       setTimeout(() => say('Okay. Let\'s see if I still remember how this goes.', 3.5), 2600);
-      setTimeout(() => say(key('move') + ' to move. ' + key('jump') + ' jumps (hold it to go higher). Hold ' + key('swing') + ' to sprint, and in the air to swing.', 6.5, true), 3600);
+      setTimeout(() => say(key('move') + ' to move. ' + key('jump') + ' jumps (hold it to go higher, tap it again to flip higher still). Hold ' + key('swing') + ' to sprint, and in the air to swing.', 6.5, true), 3600);
     }
 
     /* ---------- actions on the drones ---------- */
@@ -485,10 +486,11 @@
       const dist = d ? d.pos.distanceTo(hipNow) : Infinity;
       if (input.meleePressed) {
         player.punch(); sound('punch');
+        hero.melee(pl.state !== 'ground');
         if (d && dist < 4.5) caught('Punch');
       }
       if (input.strikePressed) {
-        if (d && dist < 32 && inCone(d.pos, 0.55)) { player.shoot(d.pos); player.strike(d.pos.clone()); striking = d; sound('thwip'); }
+        if (d && dist < 32 && inCone(d.pos, 0.55)) { player.shoot(d.pos); player.strike(d.pos.clone()); hero.shoot(d.pos, pl.shotRight, 'strike'); striking = d; sound('thwip'); }
         else if (chapter.state.stage === 'drones') say('No drone in range. Get within about 30 m, with it near the middle of the screen.', 2.6, true);
       }
       if (striking) {
@@ -499,12 +501,12 @@
         }
       }
       if (input.yankPressed) {
-        if (d && dist < (G.aiming ? 42 : 30) && inCone(d.pos, G.aiming ? 0.42 : 0.3)) { player.shoot(d.pos); sound('thwip'); caught('Yanked'); }
+        if (d && dist < (G.aiming ? 42 : 30) && inCone(d.pos, G.aiming ? 0.42 : 0.3)) { player.shoot(d.pos); hero.shoot(d.pos, pl.shotRight, 'yank'); sound('thwip'); caught('Yanked'); }
         else if (chapter.state.stage === 'drones') say('Aim with ' + key('aim') + ', then ' + key('yank') + ' to yank a drone in.', 2.6, true);
       }
       if (input.finisherPressed) {
         if (pl.focus < 100) say('Focus isn\'t full yet. Air tricks and catches fill it.', 2.4, true);
-        else if (d && dist < 95) { player.shoot(d.pos); pl.focus = 0; sound('start'); caught('Finisher'); }
+        else if (d && dist < 95) { player.shoot(d.pos); hero.play('takedown', { fin: 0.05 }); pl.focus = 0; sound('start'); caught('Finisher'); }
         else say('Nothing to finish here.', 2, true);
       }
       if (input.healPressed) {
@@ -515,6 +517,7 @@
       if (input.gadgetPressed) {
         if (gadget.charges > 0 && !gadget.flying) {
           gadget.charges--; gadget.flying = true; gadget.life = 0; gadget.burstT = -1;
+          hero.shoot(wtmp.copy(aim.o).addScaledVector(aim.d, 40), true);
           gadget.pos.copy(hero.hand(true)); gadget.vel.copy(aim.d).multiplyScalar(40).add(wtmp.set(0, 4, 0)).add(pl.vel);
           bomb.visible = true; bomb.scale.setScalar(0.25); bombMat.uniforms.uA.value = 1; sound('web');
         } else if (!gadget.charges) say('Web bombs are recharging.', 1.8, true);
@@ -553,7 +556,7 @@
     /* ---------- the frame ---------- */
     let last = performance.now(), raf = 0, fpsAcc = 0, fpsN = 0, hudT = 0, firstAir = true, swingHintDone = false;
     const projV = new T.Vector3(), up = new T.Vector3(0, 1, 0);
-    const st = { up: new T.Vector3(), fwd: new T.Vector3(), hip: new T.Vector3(), spin: { axis: new T.Vector3(), angle: 0 } };
+    const st = { up: new T.Vector3(), fwd: new T.Vector3(), hip: new T.Vector3() };
     function frame(now) {
       if (!G) return;
       raf = requestAnimationFrame(frame);
@@ -576,13 +579,14 @@
         shared.timeU.value += gdt;
         aim.o.copy(camera.position); camera.getWorldDirection(aim.d);
         if (!G.done) player.update(gdt, input, look.yaw);
+        hero.react(pl.events, pl, Math.hypot(pl.vel.x, pl.vel.z));
         for (const e of pl.events) {
           if (e === 'swing' || e === 'zip' || e === 'boost') sound('thwip');
           if (e === 'release') { const w = looseWebs[looseN++ % 2]; w.t = 0; w.a.copy(pl.webEnd); w.b.copy(hero.hand(pl.webRight)); w.v.copy(pl.vel).multiplyScalar(0.5); }
           if (e === 'land') {
             sound('land'); life.dust(pl.pos.x, pl.pos.y, pl.pos.z, pl.landT * 3.3);
             if (pl.landT > 0.15) camState.shake = Math.min(1, pl.landT * 3);
-            if (Math.hypot(pl.vel.x, pl.vel.z) > 12) rollT = 0.5; // carry the speed through a roll
+            if (pl.impact > 24 && Math.hypot(pl.vel.x, pl.vel.z) < 7) { camState.shake = 1; life.dust(pl.pos.x, pl.pos.y, pl.pos.z, 2.5); }
           }
           if (e === 'splash') {
             for (let k = 0; k < 3; k++) life.dust(pl.pos.x, pl.pos.y + 0.5, pl.pos.z, 1.2);
@@ -630,32 +634,25 @@
       while (lookOff < -Math.PI) lookOff += Math.PI * 2;
       lookOff = pl.state === 'ground' && Math.abs(lookOff) < 1.6 ? lookOff * 0.5 : 0;
       const hs = Math.hypot(pl.vel.x, pl.vel.z);
-      st.state = pl.state === 'ground' && hs < 0.6 ? 'ground' : pl.state;
-      st.speed = hs; st.sprint = U.clamp((hs - 8.5) / 7.5, 0, 1); st.vy = pl.vel.y; st.landT = pl.landT;
-      st.webPoint = pl.webEnd; st.webRight = pl.webRight; st.swingK = pl.swingK;
-      st.aimPoint = pl.shotT > 0 ? pl.shotAt : null; st.aimRight = pl.shotRight; st.look = lookOff;
-      st.dive = pl.dive && pl.state === 'air'; st.punch = pl.punchT; st.punchRight = pl.punchRight;
+      st.state = pl.state; st.speed = hs; st.vy = pl.vel.y; st.facing = pl.facing; st.look = lookOff;
+      st.webPoint = pl.webEnd; st.webRight = pl.webRight; st.swingK = pl.swingK; st.zipTo = striking ? null : pl.zipTo;
+      st.dive = pl.dive && pl.state === 'air';
       stillT = pl.state === 'ground' && hs < 0.4 && !G.photo ? stillT + dt : 0;
-      st.perch = stillT > 1.4 && pl.pos.y > 6; st.idleT = stillT;
-      rollT = Math.max(0, rollT - (G.photo ? 0 : dt));
+      st.perch = stillT > 1.4 && pl.pos.y > 6 && !hero.playing('victory');
+      st.wallRun = pl.wallRun; st.wallSide = pl.wallSide; st.wallMove = pl.wallMove;
       st.hip.copy(hipNow); st.up.set(0, 1, 0); st.fwd.set(Math.sin(pl.facing), 0, Math.cos(pl.facing));
       if (pl.state === 'swing') st.up.copy(pl.anchor).sub(hipNow).normalize().lerp(up, 0.25).normalize();
-      else if (pl.state === 'wall') { st.up.copy(pl.wallN); st.fwd.set(0, 1, 0); st.hip.addScaledVector(pl.wallN, 0.75).y -= 0.2; }
+      else if (pl.state === 'wall') {
+        const n = pl.wallN;
+        if (pl.wallRun === 'side') { // feet on the wall, leaning off it, running along it
+          st.up.set(n.x * 0.75, 0.66, n.z * 0.75).normalize(); st.fwd.set(-n.z * pl.wallSide, 0, n.x * pl.wallSide);
+          st.hip.addScaledVector(n, -0.32).y -= 0.35; st.hip.addScaledVector(st.up, 1.0);
+        } else { st.up.copy(n); st.fwd.set(0, 1, 0); st.hip.addScaledVector(n, 0.69).y -= 0.2; } // the wall is his floor
+      } else if (pl.state === 'ceiling') { st.up.set(0, -1, 0); st.hip.set(hipNow.x, pl.ceilY - 1.0, hipNow.z); }
       else if (pl.state === 'zip') st.up.lerp(wtmp.copy(pl.zipTo).sub(hipNow).normalize(), 0.45).normalize();
       else if (st.dive && pl.vel.lengthSq() > 4) { st.up.copy(pl.vel).normalize(); st.fwd.set(0, -1, 0); }
       else if (pl.state === 'air' || pl.state === 'boost') st.up.addScaledVector(st.fwd, U.clamp(hs / 60, 0, 0.45)).normalize();
-      st.spin = null;
-      if (pl.trickT > 0 && pl.trick) {
-        const k = 1 - pl.trickT / 0.62, e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
-        st.spin = { axis: pl.trick.axis, angle: pl.trick.dir * Math.PI * 2 * e };
-      } else if (rollT > 0 && pl.state === 'ground') {
-        const k = 1 - rollT / 0.5;
-        st.spin = { axis: new T.Vector3(1, 0, 0), angle: Math.PI * 2 * (1 - Math.pow(1 - k, 2.2)) };
-      } else if (pl.dodgeT > 0 && pl.state === 'ground') {
-        const f = pl.facing, xb = pl.dodgeX * Math.cos(f) - pl.dodgeZ * Math.sin(f), zb = pl.dodgeX * Math.sin(f) + pl.dodgeZ * Math.cos(f);
-        const k = 1 - pl.dodgeT / 0.3;
-        st.spin = { axis: new T.Vector3(zb, 0, -xb).normalize(), angle: Math.PI * 2 * (1 - Math.pow(1 - k, 2)) };
-      }
+      if (cheer && pl.state === 'ground' && hs < 1) { cheer = false; hero.play('victory', { cancelOnMove: true }); }
       hero.update(G.photo ? 0 : dt, st);
 
       updateCamera(dt);
@@ -710,7 +707,8 @@
         const K = (n) => key(n) + ' · ';
         const drones = chapter.state.stage === 'drones';
         const keysTxt = pl.state === 'swing' ? 'Release ' + key('swing') + ' · Let go   ' + K('jump') + 'Web-zip   ' + K('trick') + 'Trick'
-          : pl.state === 'wall' ? K('jump') + 'Jump off   ' + K('dodge') + 'Push away'
+          : pl.state === 'wall' ? key('move') + ' · Crawl   Hold ' + K('swing') + 'Wall-run   ' + K('jump') + 'Jump off   ' + K('dodge') + 'Push away'
+          : pl.state === 'ceiling' ? key('move') + ' · Crawl   ' + K('jump') + 'Drop'
           : pl.state === 'air' || pl.state === 'boost' ? 'Hold ' + K('swing') + 'Swing   ' + K('jump') + 'Web-zip   ' + K('perch') + 'Perch / dive   ' + K('trick') + 'Trick'
           : 'Hold ' + K('swing') + 'Sprint   ' + K('jump') + 'Jump   ' + K('zip') + 'Zip   ' + K('walk') + 'Walk   ' + K('map') + 'Map';
         const full = drones ? keysTxt + '\n' + K('strike') + 'Web-strike   Hold ' + key('aim') + ' + ' + K('yank') + 'Yank   ' + K('melee') + 'Strike   ' + K('gadget') + 'Web bomb' : keysTxt;

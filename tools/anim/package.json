@@ -1,0 +1,8 @@
+{
+  "name": "hero-anim-export",
+  "private": true,
+  "description": "Exports the hero's animation clips to glTF (.glb) and three.js JSON",
+  "type": "module",
+  "scripts": { "export": "node export.mjs" },
+  "dependencies": { "three": "0.170.0" }
+}

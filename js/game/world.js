@@ -726,12 +726,16 @@
      */
     const hit = { ground: false, water: false, wall: false, nx: 0, nz: 0, top: 0, roofY: 0 };
     function collide(p, v, hw, h) {
-      hit.ground = false; hit.water = false; hit.wall = false; hit.nx = 0; hit.nz = 0;
+      hit.ground = false; hit.water = false; hit.wall = false; hit.ceil = false; hit.nx = 0; hit.nz = 0;
       near(p.x - hw, p.z - hw, p.x + hw, p.z + hw, (s) => {
         if (p.x + hw <= s[0] || p.x - hw >= s[3] || p.z + hw <= s[2] || p.z - hw >= s[5] || p.y >= s[4] || p.y + h <= s[1]) return;
         const ox = Math.min(p.x + hw - s[0], s[3] - (p.x - hw)), oz = Math.min(p.z + hw - s[2], s[5] - (p.z - hw));
-        const up = s[4] - p.y;
-        if (up <= Math.min(ox, oz) + 0.05 || up < 0.55) { // on top (or a small step up)
+        const up = s[4] - p.y, under = p.y + h - s[1];
+        if (s[1] > 0.5 && under < up && under < 0.7 && under <= Math.min(ox, oz) + 0.05) { // head against the underside
+          p.y = s[1] - h;
+          if (v.y > 0) v.y = 0;
+          hit.ceil = true; hit.ceilY = s[1]; hit.ceilW = Math.min(s[3] - s[0], s[5] - s[2]);
+        } else if (up <= Math.min(ox, oz) + 0.05 || up < 0.55) { // on top (or a small step up)
           p.y = s[4];
           if (v.y < 0) v.y = 0;
           hit.ground = true; hit.roofY = s[4];
@@ -750,6 +754,13 @@
       const floor = p.x > RIVER_X && p.x < 1600 ? WATER_Y : 0;
       if (p.y <= floor) { p.y = floor; if (v.y < 0) v.y = 0; if (floor < 0) hit.water = true; else { hit.ground = true; hit.roofY = 0; } }
       return hit;
+    }
+
+    /** The underside of whatever is just above a point at height y (within 0.3 m), or null. */
+    function ceilingAt(x, z, y) {
+      let found = null;
+      near(x, z, x, z, (s) => { if (x > s[0] && x < s[3] && z > s[2] && z < s[5] && Math.abs(s[1] - y) < 0.3) found = s[1]; });
+      return found;
     }
 
     /** The roof height under a point, if something is there (else the street or the water). */
@@ -834,7 +845,7 @@
 
     return {
       PITCH, LOT, SPAN, RIVER_X, WATER_Y, bugleTop, tops, solids, cityU, groundMat, extent: (SPAN + 0.5) * PITCH, promenade: PROM0 + 20,
-      applyPalette, update, collide, floorAt, raycast, findAnchor, findPerch, near, dispose,
+      applyPalette, update, collide, floorAt, ceilingAt, raycast, findAnchor, findPerch, near, dispose,
       start: new T.Vector3(0, 46, 0),
     };
   }

@@ -1,6 +1,9 @@
 /* How the hero moves. Shift swings in the air and sprints on the ground; Space jumps (hold it
-   to go higher) and, in the air, fires a web-zip that throws him forward; C zips to the point
-   he is aiming at; X perches on that point or dives; Ctrl dodges; T throws an air trick; Alt walks.
+   to go higher; tap it again on the way up to double-jump) and, in the air, fires a web-zip that
+   throws him forward; C zips to the point he is aiming at; X perches on that point or dives;
+   Ctrl dodges; T throws an air trick; Alt walks. On a wall he crawls any way he is pushed
+   (toward the wall is up); with Shift he runs up it, or along it. Jumping up under a roof or a
+   bridge deck sticks him to the underside, to crawl along it.
    Swings are a real pendulum (gravity pulls, the rope holds) worked in 1/240 s slices, so fast
    swings stay stable at any frame rate. */
 (function () {
@@ -13,7 +16,7 @@
   const HW = 0.32, H = 1.75; // the hero's collision box: half width and height
   const HIP = 1.0;           // hips above the feet
   const STEP = 1 / 240;      // physics slice
-  const WALK = 3.2, RUN = 8.5, SPRINT = 16, WALL = 15, ZIP = 46, MAX = 44;
+  const WALK = 2.0, RUN = 8.5, SPRINT = 16, WALL = 15, WALLSIDE = 13, CRAWL = 4.5, ZIP = 46, MAX = 44;
   const TRICKS = [['Front flip', [1, 0, 0], 1], ['Back flip', [1, 0, 0], -1], ['Corkscrew', [0, 0, 1], 1], ['Twister', [0, 1, 0], 1], ['Barrel roll', [0, 0, 1], -1]];
 
   function createPlayer(world, tuning) {
@@ -22,7 +25,7 @@
       pos: world.start.clone(), vel: new T.Vector3(), state: 'ground', facing: Math.PI,
       anchor: new T.Vector3(), webEnd: new T.Vector3(), rope: 0, ropeMax: 0, webRight: true, swingT: 0, swingK: 0,
       zipTo: new T.Vector3(), zipEdge: false, zipN: new T.Vector3(), zipT: 0, zipCool: 0, boostCool: 0, boostT: 0,
-      wallN: new T.Vector3(), wallTop: 0, wallT: 0,
+      wallN: new T.Vector3(), wallTop: 0, wallT: 0, wallRun: null, wallSide: 1, wallMove: { x: 0, y: 0 }, ceilY: 0, ceilT: 0, canDouble: false, impact: 0,
       airT: 0, groundT: 0, landT: 0, coyote: 0, jumpBuf: 0, jumpHold: 0, dive: false,
       dodgeT: 0, dodgeX: 0, dodgeZ: 0, trickT: 0, trick: null, combo: 0,
       shotT: 0, shotAt: new T.Vector3(), shotRight: true, punchT: 0, punchRight: false,
@@ -39,7 +42,7 @@
     };
     function gainFocus(n) { p.focus = Math.min(100, p.focus + n); }
 
-    function toAir() { p.state = 'air'; p.airT = 0; p.dive = false; }
+    function toAir() { p.state = 'air'; p.airT = 0; p.dive = false; p.canDouble = false; p.wallRun = null; }
 
     function startSwing(a) {
       p.state = 'swing'; p.dive = false;
@@ -97,8 +100,14 @@
       p.events.push('zip');
     }
 
+    function enterCeiling(y) {
+      p.state = 'ceiling'; p.dive = false; p.ceilY = y; p.ceilT = 0;
+      p.vel.set(p.vel.x * 0.3, 0, p.vel.z * 0.3);
+      p.events.push('ceiling');
+    }
+
     function enterWall(nx, nz, top) {
-      p.state = 'wall'; p.dive = false;
+      p.state = 'wall'; p.dive = false; p.wallRun = null; p.wallMove.x = 0; p.wallMove.y = 0;
       p.wallN.set(nx, 0, nz); p.wallTop = top; p.wallT = 0;
       p.vel.set(0, Math.max(p.vel.y, 4), 0);
       p.stats.walls++;
@@ -107,6 +116,7 @@
 
     function land(fromVy) {
       const impact = -fromVy;
+      p.impact = impact;
       if (p.trickT > 0.15) p.events.push('sloppy');
       p.state = 'ground'; p.groundT = 0; p.dive = false; p.trickT = 0; p.trick = null; p.combo = 0;
       p.landT = U.clamp(impact / 34, 0, 0.3);
@@ -143,6 +153,7 @@
         const l = Math.hypot(dx, dz); p.dodgeX = dx / l; p.dodgeZ = dz / l; p.dodgeT = 0.3;
         if (p.state === 'swing') release(false);
         if (p.state === 'wall') { toAir(); p.vel.set(p.wallN.x * 6, 2, p.wallN.z * 6); }
+        if (p.state === 'ceiling') { toAir(); p.vel.y = -2; }
         p.events.push('dodge');
       }
       if (input.trickPressed && (p.state === 'air' || p.state === 'boost') && p.trickT <= 0) {
@@ -165,6 +176,7 @@
       if (p.state === 'ground' && hs > 0.5 && p.dodgeT <= 0) p.facing = turn(p.facing, Math.atan2(p.vel.x, p.vel.z), 14 * dt);
       else if ((p.state === 'air' || p.state === 'swing' || p.state === 'zip' || p.state === 'boost') && hs > 2 && p.dodgeT <= 0) p.facing = turn(p.facing, Math.atan2(p.vel.x, p.vel.z), 5 * dt);
       else if (p.state === 'wall') p.facing = Math.atan2(-p.wallN.x, -p.wallN.z);
+      else if (p.state === 'ceiling' && hs > 0.5) p.facing = turn(p.facing, Math.atan2(p.vel.x, p.vel.z), 8 * dt);
     }
 
     function turn(a, b, k) {
@@ -194,6 +206,7 @@
           p.vel.y = input.swing ? 10.5 : 9.2;
           p.jumpHold = 0.4; // keep holding Space to keep rising
           toAir();
+          p.canDouble = true;
           p.events.push('jump');
         }
       } else if (p.state === 'air' || p.state === 'boost') {
@@ -205,8 +218,12 @@
         p.vel.x += wish.x * 13 * h; p.vel.z += wish.z * 13 * h;
         const drag = 1 - 0.04 * h; p.vel.x *= drag; p.vel.z *= drag;
         if (p.vel.y < (p.dive ? -75 : -55)) p.vel.y = p.dive ? -75 : -55;
-        // Space in the air: web-zip forward
-        if (p.jumpBuf > 0 && p.coyote <= 0 && p.boostCool <= 0 && p.airT > 0.12) { p.jumpBuf = 0; p.jumpHold = 0; webBoost(input.aim && input.aim.d); }
+        // Space again on the way up from a jump: a second, flipping jump. Otherwise Space in the air web-zips him forward
+        if (p.jumpBuf > 0 && p.coyote <= 0 && p.canDouble && p.airT > 0.08 && p.airT < 0.6) {
+          p.jumpBuf = 0; p.jumpHold = 0; p.canDouble = false;
+          p.vel.y = Math.max(p.vel.y, 0) + 8.5;
+          p.events.push('jump2');
+        } else if (p.jumpBuf > 0 && p.coyote <= 0 && p.boostCool <= 0 && p.airT > 0.12) { p.jumpBuf = 0; p.jumpHold = 0; webBoost(input.aim && input.aim.d); }
         // Shift in the air: swing
         if (input.swing && p.state === 'air' && (p.airT > 0.12 || !input.jump)) {
           hipPoint(hip);
@@ -216,7 +233,7 @@
           else if (!p.noAnchorShown) { p.events.push('noAnchor'); p.noAnchorShown = true; }
         }
         if (!input.swing) p.noAnchorShown = false;
-        if (p.coyote > 0) { p.coyote -= h; if (p.jumpBuf > 0) { p.jumpBuf = 0; p.vel.y = 9.2; p.jumpHold = 0.4; p.coyote = 0; p.events.push('jump'); } }
+        if (p.coyote > 0) { p.coyote -= h; if (p.jumpBuf > 0) { p.jumpBuf = 0; p.vel.y = 9.2; p.jumpHold = 0.4; p.coyote = 0; p.canDouble = true; p.events.push('jump'); } }
       } else if (p.state === 'swing') {
         p.swingT += h;
         p.vel.y -= G * h;
@@ -246,9 +263,10 @@
         tmp.set(p.vel.x, 0, p.vel.z).normalize();
         p.swingK = U.clamp(-(d.x * tmp.x + d.z * tmp.z) * 1.6, -1, 1);
         if (p.vel.length() > MAX) p.vel.setLength(MAX);
+        const vyIn = p.vel.y;
         const c = world.collide(p.pos, p.vel, HW, H);
         if (c.water) { if (!p.wet) { p.wet = true; p.events.push('splash'); } release(false); return; }
-        if (c.ground) { land(p.vel.y); return; }
+        if (c.ground) { land(vyIn); return; }
         if (c.wall && c.top - p.pos.y > 2) { enterWall(c.nx, c.nz, c.top); return; }
         if (p.jumpBuf > 0 && p.boostCool <= 0) { p.jumpBuf = 0; webBoost(input.aim && input.aim.d); return; } // Space mid-swing: let go and zip on
         if (!input.swing) release(p.swingT > 0.35);
@@ -277,16 +295,19 @@
       } else if (p.state === 'wall') {
         p.wallT += h;
         const n = p.wallN;
-        const into = -(wish.x * n.x + wish.z * n.z);           // pushing toward the wall: climb
-        tan.set(-n.z, 0, n.x);                                   // along the wall
+        const into = -(wish.x * n.x + wish.z * n.z);           // pushing toward the wall: up; away: down
+        tan.set(-n.z, 0, n.x);                                   // along the wall (his left, facing it)
         const side = wish.dot(tan);
-        if (into < -0.55 && p.wallT > 0.15) {                   // pressing away: let go
-          p.vel.set(n.x * 4, 0, n.z * 4);
-          toAir();
-          return;
-        }
-        const climb = into > 0.2 ? (input.swing ? WALL * 1.25 : WALL) * U.clamp(into * 1.3, 0, 1) : (hasWish ? 0 : p.wallT < 0.6 ? 0 : -1.5);
-        p.vel.set(tan.x * side * 8, climb, tan.z * side * 8);
+        let up = 0, along = 0;
+        if (input.swing && (into > 0.3 || Math.abs(side) > 0.5)) { // Shift: run up it, or along it
+          if (into >= Math.abs(side) * 0.8) { up = WALL * 1.25 * U.clamp(into * 1.3, 0, 1); along = side * 4; p.wallRun = 'up'; }
+          else { up = 0.5; along = Math.sign(side) * WALLSIDE; p.wallRun = 'side'; p.wallSide = side > 0 ? 1 : -1; }
+        } else if (hasWish) { // crawl, any way
+          up = U.clamp(into * 1.4, -1, 1) * CRAWL; along = U.clamp(side * 1.4, -1, 1) * CRAWL; p.wallRun = null;
+        } else p.wallRun = null;
+        const k = 1 - Math.exp(-14 * h);
+        p.wallMove.x += (along - p.wallMove.x) * k; p.wallMove.y += (up - p.wallMove.y) * k;
+        p.vel.set(tan.x * p.wallMove.x, p.wallMove.y, tan.z * p.wallMove.x);
         p.pos.addScaledVector(p.vel, h);
         p.pos.x -= n.x * 0.05; p.pos.z -= n.z * 0.05;           // stay pressed to the wall
         if (p.pos.y + 0.6 >= p.wallTop) {                        // over the top
@@ -299,28 +320,44 @@
         }
         if (p.jumpBuf > 0) {                                     // kick off the wall
           p.jumpBuf = 0;
-          p.vel.set(n.x * 9 + tan.x * side * 4, 10, n.z * 9 + tan.z * side * 4);
+          p.vel.set(n.x * 9 + tan.x * side * 4 + tan.x * p.wallMove.x * 0.5, 10, n.z * 9 + tan.z * side * 4 + tan.z * p.wallMove.x * 0.5);
           p.jumpHold = 0.3;
           toAir();
-          p.facing = Math.atan2(n.x, n.z);
-          p.events.push('jump');
+          p.facing = Math.atan2(p.vel.x, p.vel.z);
+          p.events.push('walljump');
           return;
         }
         const c = world.collide(p.pos, p.vel, HW, H);
+        if (c.ceil && c.ceilW > 2.5) { enterCeiling(c.ceilY); return; }
         if (c.ground && p.vel.y <= 0) { land(-1); return; }
         if (!c.wall) { if (p.wallT > 0.15) toAir(); return; }
         if (c.nx !== n.x || c.nz !== n.z) { p.wallN.set(c.nx, 0, c.nz); p.wallTop = c.top; }
         return;
       }
 
+      if (p.state === 'ceiling') { // under a roof or a deck: crawl along the underside, camera-relative
+        p.ceilT += h;
+        const k = 1 - Math.exp(-10 * h);
+        p.vel.x += (wish.x * CRAWL * 0.85 - p.vel.x) * k; p.vel.z += (wish.z * CRAWL * 0.85 - p.vel.z) * k; p.vel.y = 0;
+        p.pos.x += p.vel.x * h; p.pos.z += p.vel.z * h;
+        p.pos.y = p.ceilY - H - 0.02;
+        const drop = (p.jumpBuf > 0 && p.ceilT > 0.2) || world.ceilingAt(p.pos.x, p.pos.z, p.ceilY) === null;
+        if (drop) { p.jumpBuf = 0; toAir(); p.vel.y = -1; p.pos.y -= 0.1; p.events.push('drop'); return; }
+        const c = world.collide(p.pos, p.vel, HW, H);
+        if (c.ground) land(-1);
+        return;
+      }
+
       p.pos.addScaledVector(p.vel, h);
+      const vyIn = p.vel.y; // the collision stops the fall; the landing needs to know how hard it was
       const c = world.collide(p.pos, p.vel, HW, H);
       if (c.water) { if (!p.wet) { p.wet = true; p.events.push('splash'); } return; }
+      if (p.state !== 'ground' && c.ceil && c.ceilW > 2.5 && p.vel.y >= -1) { enterCeiling(c.ceilY); return; }
       if (p.state === 'ground') {
         if (!c.ground) { toAir(); p.coyote = 0.12; }
         else if (c.wall && hasWish && -(wish.x * c.nx + wish.z * c.nz) > 0.6 && c.top - p.pos.y > 1.2) enterWall(c.nx, c.nz, c.top);
       } else {
-        if (c.ground) land(p.vel.y);
+        if (c.ground) land(vyIn);
         else if (c.wall && c.top - p.pos.y > 1.6 && (hasWish || p.airT > 0.15)) enterWall(c.nx, c.nz, c.top);
       }
     }
@@ -337,7 +374,7 @@
 
     function reset(pos, facing) {
       p.pos.copy(pos); p.vel.set(0, 0, 0); p.state = 'ground'; p.facing = facing; p.wet = false;
-      p.dive = false; p.trickT = 0; p.trick = null; p.combo = 0; p.dodgeT = 0; p.health = 100;
+      p.dive = false; p.trickT = 0; p.trick = null; p.combo = 0; p.dodgeT = 0; p.health = 100; p.wallRun = null; p.canDouble = false;
     }
 
     return { p, update, shoot, punch, strike, reset, hipPoint, gainFocus, HIP };

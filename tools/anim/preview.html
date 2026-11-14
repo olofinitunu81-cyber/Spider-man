@@ -1,0 +1,159 @@
+<!doctype html>
+<!-- Every hero animation on a plain mannequin rigged to the hero's skeleton.
+     Open this file in a browser (no server needed). Pick a clip on the left; drag to turn the view.
+     ?sheet=clip1,clip2&cols=6&view=34|side|front|top draws a contact sheet instead. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hero animations</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #14161c; color: #e9e6df; font: 13px/1.35 system-ui, sans-serif; overflow: hidden; }
+  #ui { position: absolute; left: 0; top: 0; bottom: 0; width: 210px; overflow-y: auto; background: #1b1e26; border-right: 1px solid #2b2f3a; padding: 10px 0; }
+  #ui button { display: block; width: 100%; text-align: left; background: none; border: 0; color: inherit; padding: 5px 14px; font: inherit; cursor: pointer; }
+  #ui button:hover { background: #262a35; }
+  #ui button.on { background: #b3242c; color: #fff; }
+  #ui h1 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; margin: 4px 14px 10px; color: #9aa0ad; }
+  #bar { position: absolute; left: 226px; bottom: 14px; display: flex; gap: 10px; align-items: center; }
+  #bar label { color: #9aa0ad; }
+  canvas { display: block; }
+  body.sheet #ui, body.sheet #bar { display: none; }
+</style>
+</head>
+<body>
+<div id="ui"><h1>Clips</h1></div>
+<div id="bar"><button id="play">Pause</button><label>Speed <input id="speed" type="range" min="0.1" max="2" step="0.05" value="1"></label><span id="info"></span></div>
+<script>window.SMR = {};</script>
+<script src="../../vendor/three.min.js"></script>
+<script src="../../js/game/herorig.js"></script>
+<script src="../../js/game/anims.js"></script>
+<script>
+(function () {
+  'use strict';
+  const T = THREE, A = SMR.anim, qs = new URLSearchParams(location.search);
+  const solver = A.createSolver(SMR.heroRig.meta);
+  const baked = A.bake(solver);
+  const names = Object.keys(baked);
+
+  const renderer = new T.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+  document.body.appendChild(renderer.domElement);
+  const scene = new T.Scene();
+  scene.background = new T.Color('#14161c');
+  scene.add(new T.HemisphereLight('#dfe6ff', '#3a3226', 1.6));
+  const sun = new T.DirectionalLight('#fff4e0', 2.2); sun.position.set(2, 4, 3); scene.add(sun);
+  const grid = new T.GridHelper(8, 16, '#4a5060', '#2a2e38'); scene.add(grid);
+  const axisZ = new T.ArrowHelper(new T.Vector3(0, 0, 1), new T.Vector3(0, 0.002, 0), 0.6, '#d04040', 0.12, 0.06); scene.add(axisZ); // he faces +z
+
+  // the mannequin, skinned to the hero's bones
+  const geo = A.mannequin(solver);
+  const mat = new T.MeshStandardMaterial({ color: '#c9c3b6', roughness: 0.62, metalness: 0.0 });
+  const mesh = new T.SkinnedMesh(geo, mat);
+  const bones = solver.names.map((nm) => { const b = new T.Bone(); b.name = nm; return b; });
+  bones.forEach((b, i) => {
+    const p = solver.parent[i];
+    b.position.copy(solver.restLocalPos[i]); b.quaternion.copy(solver.restLocalQ[i]);
+    if (p < 0) mesh.add(b); else bones[p].add(b);
+  });
+  mesh.updateMatrixWorld(true);
+  mesh.bind(new T.Skeleton(bones));
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  // a marker under the hips shows where root motion would carry him
+  const rootDot = new T.Mesh(new T.RingGeometry(0.07, 0.1, 24).rotateX(-Math.PI / 2), new T.MeshBasicMaterial({ color: '#e0b040' }));
+  scene.add(rootDot);
+
+  const qa = new T.Quaternion(), qb = new T.Quaternion();
+  function pose(b, t, withRoot) {
+    const n = solver.n;
+    let f = t * b.fps;
+    if (b.loop) f = ((f % b.frames) + b.frames) % b.frames; else f = Math.min(Math.max(f, 0), b.frames - 1);
+    const f0 = Math.floor(f), f1 = b.loop ? (f0 + 1) % b.frames : Math.min(f0 + 1, b.frames - 1), u = f - f0;
+    for (let i = 0; i < n; i++) {
+      qa.fromArray(b.q, (f0 * n + i) * 4); qb.fromArray(b.q, (f1 * n + i) * 4);
+      bones[i].quaternion.copy(qa).slerp(qb, u);
+    }
+    const h = (k) => b.hip[f0 * 3 + k] + (b.hip[f1 * 3 + k] - b.hip[f0 * 3 + k]) * u;
+    const r = (k) => (withRoot ? b.root[f0 * 3 + k] + (b.root[f1 * 3 + k] - b.root[f0 * 3 + k]) * u : 0);
+    bones[0].position.set(h(0) + r(0), h(1) + r(1), h(2) + r(2));
+    rootDot.position.set(r(0), 0.003, r(2));
+    mesh.updateMatrixWorld(true);
+  }
+
+  const cam = new T.PerspectiveCamera(30, 1, 0.05, 100);
+  function view(kind, target, dist) {
+    const dirs = { 34: [0.75, 0.32, 1], side: [1, 0.12, 0], front: [0, 0.15, 1], top: [0.2, 1, 0.3], back: [-0.6, 0.3, -1] };
+    const d = new T.Vector3(...(dirs[kind] || dirs[34])).normalize();
+    cam.position.copy(target).addScaledVector(d, dist);
+    cam.lookAt(target);
+  }
+
+  const sheet = qs.get('sheet');
+  if (sheet) {
+    document.body.classList.add('sheet');
+    const list = sheet === 'all' ? names : sheet.split(',').filter((s) => baked[s]);
+    const cols = +qs.get('cols') || 6, kind = qs.get('view') || '34', cw = +qs.get('cw') || 200, ch = +qs.get('ch') || 230;
+    const W = cols * cw, H = list.length * ch;
+    renderer.setPixelRatio(1);
+    renderer.setSize(W, H);
+    renderer.setScissorTest(true);
+    renderer.autoClear = false;
+    const label = document.createElement('canvas'); label.width = W; label.height = H;
+    Object.assign(label.style, { position: 'absolute', left: 0, top: 0 });
+    document.body.appendChild(label);
+    const g = label.getContext('2d');
+    g.font = '12px system-ui'; g.fillStyle = '#e9e6df';
+    renderer.setClearColor('#14161c'); renderer.clear();
+    list.forEach((nm, row) => {
+      const b = baked[nm];
+      for (let c = 0; c < cols; c++) {
+        const t = b.loop ? (c / cols) * b.dur : (c / (cols - 1)) * b.dur;
+        pose(b, t, false);
+        const hp = new T.Vector3(); bones[0].getWorldPosition(hp);
+        view(kind, new T.Vector3(0, Math.max(0.55, hp.y * 0.85), 0), 4.6);
+        cam.aspect = cw / ch; cam.updateProjectionMatrix();
+        const x = c * cw, y = H - (row + 1) * ch;
+        renderer.setViewport(x, y, cw, ch); renderer.setScissor(x, y, cw, ch);
+        renderer.render(scene, cam);
+        g.fillText((c === 0 ? nm + '  ' : '') + t.toFixed(2) + 's', x + 6, row * ch + 15);
+      }
+    });
+    document.title = 'done';
+    return;
+  }
+
+  // interactive viewer
+  let cur = baked[qs.get('clip')] || baked.idle, t0 = performance.now(), playing = true, tt = 0, yaw = 0.6, pitch = 0.25, last = performance.now();
+  const ui = document.getElementById('ui');
+  names.forEach((nm) => {
+    const b = document.createElement('button');
+    b.textContent = nm + (baked[nm].loop ? '  ↻' : '');
+    b.onclick = () => { cur = baked[nm]; tt = 0; [...ui.querySelectorAll('button')].forEach((x) => x.classList.toggle('on', x === b)); };
+    if (baked[nm] === cur) b.classList.add('on');
+    ui.appendChild(b);
+  });
+  document.getElementById('play').onclick = (e) => { playing = !playing; e.target.textContent = playing ? 'Pause' : 'Play'; };
+  let drag = null;
+  renderer.domElement.addEventListener('pointerdown', (e) => { drag = [e.clientX, e.clientY]; });
+  addEventListener('pointerup', () => { drag = null; });
+  addEventListener('pointermove', (e) => { if (!drag) return; yaw -= (e.clientX - drag[0]) * 0.01; pitch = Math.max(-0.2, Math.min(1.2, pitch + (e.clientY - drag[1]) * 0.01)); drag = [e.clientX, e.clientY]; });
+  function resize() { renderer.setSize(innerWidth, innerHeight); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); }
+  addEventListener('resize', resize); resize();
+  (function frame(now) {
+    requestAnimationFrame(frame);
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (playing) tt += dt * +document.getElementById('speed').value;
+    let t = tt;
+    if (!cur.loop) t = tt % (cur.dur + 0.6);
+    pose(cur, t, true);
+    const tgt = new T.Vector3(rootDot.position.x, 0.9, rootDot.position.z);
+    cam.position.set(tgt.x + Math.sin(yaw) * Math.cos(pitch) * 4.2, tgt.y + Math.sin(pitch) * 4.2, tgt.z + Math.cos(yaw) * Math.cos(pitch) * 4.2);
+    cam.lookAt(tgt);
+    document.getElementById('info').textContent = cur.name + '  ' + Math.min(t, cur.dur).toFixed(2) + ' / ' + cur.dur.toFixed(2) + ' s';
+    renderer.render(scene, cam);
+  })(last);
+})();
+</script>
+</body>
+</html>
